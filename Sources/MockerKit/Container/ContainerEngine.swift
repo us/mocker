@@ -204,7 +204,89 @@ public actor ContainerEngine {
             for id in containerIDs { try await resolved.append(resolve(id)) }
             containers = resolved
         }
-        return containers.map { ($0, ContainerStats()) }
+        var results: [(ContainerInfo, ContainerStats)] = []
+        for c in containers {
+            let s = await fetchContainerStats(c)
+            results.append((c, s))
+        }
+        return results
+    }
+
+    private func fetchContainerStats(_ container: ContainerInfo) async -> ContainerStats {
+        // Single ps call with full command line
+        guard let (psOut, _) = try? await runProcess("/bin/ps", ["ax", "-o", "pid,pcpu,rss,command"]) else {
+            return ContainerStats()
+        }
+
+        struct VMProc { var pid: Int32; var cpu: Double; var rss: UInt64 }
+        var thisRuntimePID: Int32? = nil
+        var allRuntimePIDs: [Int32] = []
+        var allVMProcs: [VMProc] = []
+
+        for line in psOut.components(separatedBy: "\n") {
+            let parts = line.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+            guard parts.count >= 4, let pid = Int32(parts[0]) else { continue }
+            let cpu = Double(parts[1]) ?? 0
+            let rss = (UInt64(parts[2]) ?? 0) * 1024
+            let cmd = parts[3...].joined(separator: " ")
+
+            if cmd.contains("container-runtime-linux") {
+                allRuntimePIDs.append(pid)
+                if cmd.contains("--uuid \(container.name)") { thisRuntimePID = pid }
+            } else if cmd.contains("Virtualization.VirtualMachine") {
+                allVMProcs.append(VMProc(pid: pid, cpu: cpu, rss: rss))
+            }
+        }
+
+        guard let runtimePID = thisRuntimePID else { return ContainerStats() }
+
+        // Match runtimes → VMs by sorted PID position.
+        // VMs are XPC services (PPID=1) so we can't use parent PID.
+        // Instead: sort both by PID, filter VMs with PID > min(runtime PID),
+        // then pair by index (1st runtime ↔ 1st VM, etc.)
+        let sortedRuntimes = allRuntimePIDs.sorted()
+        let minRuntime = sortedRuntimes.min() ?? 0
+        let sortedVMs = allVMProcs.filter { $0.pid > minRuntime }.sorted { $0.pid < $1.pid }
+
+        guard let runtimeIndex = sortedRuntimes.firstIndex(of: runtimePID),
+              runtimeIndex < sortedVMs.count else { return ContainerStats() }
+
+        let vm = sortedVMs[runtimeIndex]
+
+        // Memory limit from container inspect
+        var memLimit: UInt64 = 1_073_741_824 // 1 GB default
+        if let (inspectOut, _) = try? await runCLI(["inspect", container.name]),
+           let data = inspectOut.data(using: .utf8),
+           let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+           let first = arr.first,
+           let cfg = first["configuration"] as? [String: Any],
+           let resources = cfg["resources"] as? [String: Any],
+           let mem = resources["memoryInBytes"] as? Int {
+            memLimit = UInt64(mem)
+        }
+
+        return ContainerStats(cpuPercent: vm.cpu, memUsage: vm.rss, memLimit: memLimit)
+    }
+
+    @discardableResult
+    private func runProcess(_ path: String, _ arguments: [String]) async throws -> (String, Int32) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = arguments
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        try process.run()
+        // Read on a background thread to drain the pipe continuously,
+        // preventing pipe-buffer deadlock with large output.
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
+                let out = String(data: data, encoding: .utf8) ?? ""
+                continuation.resume(returning: (out, process.terminationStatus))
+            }
+        }
     }
 
     // MARK: - Start (stopped container)
@@ -324,14 +406,34 @@ public actor ContainerEngine {
 // MARK: - Supporting types
 
 public struct ContainerStats: Sendable {
-    public var cpuPercent: Double = 0
-    public var memUsage: UInt64 = 0
-    public var memLimit: UInt64 = 0
-    public var netIn: UInt64 = 0
-    public var netOut: UInt64 = 0
-    public var blockIn: UInt64 = 0
-    public var blockOut: UInt64 = 0
-    public var pids: Int = 0
+    public var cpuPercent: Double
+    public var memUsage: UInt64
+    public var memLimit: UInt64
+    public var netIn: UInt64
+    public var netOut: UInt64
+    public var blockIn: UInt64
+    public var blockOut: UInt64
+    public var pids: Int
+
+    public init(
+        cpuPercent: Double = 0,
+        memUsage: UInt64 = 0,
+        memLimit: UInt64 = 0,
+        netIn: UInt64 = 0,
+        netOut: UInt64 = 0,
+        blockIn: UInt64 = 0,
+        blockOut: UInt64 = 0,
+        pids: Int = 0
+    ) {
+        self.cpuPercent = cpuPercent
+        self.memUsage = memUsage
+        self.memLimit = memLimit
+        self.netIn = netIn
+        self.netOut = netOut
+        self.blockIn = blockIn
+        self.blockOut = blockOut
+        self.pids = pids
+    }
 }
 
 // MARK: - Async helpers
