@@ -12,6 +12,8 @@ public struct ContainerInfo: Codable, Sendable, Identifiable {
     public var labels: [String: String]
     public var command: String
     public var pid: Int?
+    /// Container IP address assigned by vmnet (Apple Containerization).
+    public var networkAddress: String
 
     public init(
         id: String,
@@ -23,7 +25,8 @@ public struct ContainerInfo: Codable, Sendable, Identifiable {
         ports: [PortMapping] = [],
         labels: [String: String] = [:],
         command: String = "",
-        pid: Int? = nil
+        pid: Int? = nil,
+        networkAddress: String = ""
     ) {
         self.id = id
         self.name = name
@@ -35,6 +38,7 @@ public struct ContainerInfo: Codable, Sendable, Identifiable {
         self.labels = labels
         self.command = command
         self.pid = pid
+        self.networkAddress = networkAddress
     }
 
     /// Short ID (first 12 characters).

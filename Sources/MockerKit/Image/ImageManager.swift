@@ -1,74 +1,76 @@
 import Foundation
+import Containerization
+import ContainerizationOCI
 
-/// Manages container images.
+/// Manages container images using Apple's Containerization framework.
 public actor ImageManager {
-    private let config: MockerConfig
-    private let store: ImageStore
+    private let imageStore: Containerization.ImageStore
 
     public init(config: MockerConfig = MockerConfig()) throws {
-        self.config = config
-        self.store = try ImageStore(path: config.imagesPath)
+        self.imageStore = try Containerization.ImageStore(path: config.ociStorePath)
     }
+
+    // MARK: - Pull
 
     /// Pull an image from a registry.
-    public func pull(_ reference: String) async throws -> ImageInfo {
-        let ref = try ImageReference.parse(reference)
+    /// Returns (image, alreadyExisted) so the CLI can show the right status message.
+    public func pull(_ reference: String) async throws -> (ImageInfo, Bool) {
+        let normalized = try Self.normalize(reference)
 
-        // Return existing image if already pulled
-        if let existing = try await store.findByReference("\(ref.fullRepository):\(ref.tag)") {
-            return existing
+        // Check if already present
+        if let existing = try? await imageStore.get(reference: normalized) {
+            return (Self.toImageInfo(existing), true)
         }
 
-        // TODO: Use Containerization framework to actually pull the image
-        // For now, create a placeholder
-        let id = generateID()
-        let info = ImageInfo(
-            id: id,
-            repository: ref.fullRepository,
-            tag: ref.tag,
-            size: 0,
-            created: Date()
-        )
-        try await store.save(info)
-        return info
+        let image = try await imageStore.pull(reference: normalized, platform: .arm64)
+        return (Self.toImageInfo(image), false)
     }
+
+    // MARK: - List
 
     /// List all local images.
     public func list() async throws -> [ImageInfo] {
-        try await store.listAll()
+        let images = try await imageStore.list()
+        return images.map(Self.toImageInfo)
     }
 
-    /// Remove an image.
+    // MARK: - Remove
+
+    /// Remove an image by reference.
     public func remove(_ reference: String) async throws -> ImageInfo {
-        guard let image = try await store.findByReference(reference) else {
+        let normalized = try Self.normalize(reference)
+        guard let image = try? await imageStore.get(reference: normalized) else {
             throw MockerError.imageNotFound(reference)
         }
-        try await store.delete(image.id)
-        return image
+        let info = Self.toImageInfo(image)
+        try await imageStore.delete(reference: normalized)
+        return info
     }
+
+    // MARK: - Tag
 
     /// Tag an image with a new reference.
     public func tag(_ source: String, _ target: String) async throws {
-        guard let image = try await store.findByReference(source) else {
-            throw MockerError.imageNotFound(source)
-        }
-        let targetRef = try ImageReference.parse(target)
-        var tagged = image
-        tagged.id = generateID()
-        tagged.repository = targetRef.fullRepository
-        tagged.tag = targetRef.tag
-        try await store.save(tagged)
+        let src = try Self.normalize(source)
+        let dst = try Self.normalize(target)
+        _ = try await imageStore.tag(existing: src, new: dst)
     }
+
+    // MARK: - Inspect
 
     /// Inspect an image.
     public func inspect(_ reference: String) async throws -> ImageInfo {
-        guard let image = try await store.findByReference(reference) else {
+        let normalized = try Self.normalize(reference)
+        guard let image = try? await imageStore.get(reference: normalized) else {
             throw MockerError.imageNotFound(reference)
         }
-        return image
+        return Self.toImageInfo(image)
     }
 
+    // MARK: - Build
+
     /// Build an image from a Dockerfile.
+    /// Real BuildKit integration is a TODO — validates Dockerfile exists and registers metadata.
     public func build(tag: String, context: String, dockerfile: String = "Dockerfile") async throws -> ImageInfo {
         let contextURL = URL(fileURLWithPath: context)
         let dockerfilePath = contextURL.appendingPathComponent(dockerfile).path
@@ -77,30 +79,89 @@ public actor ImageManager {
             throw MockerError.buildError("Dockerfile not found at \(dockerfilePath)")
         }
 
-        // TODO: Use Containerization framework BuildKit support
+        // TODO: Use Containerization BuildKit support when available
+        // For now return a placeholder — image operations work, build does not
         let ref = try ImageReference.parse(tag)
-        let id = generateID()
+        let fakeDigest = "sha256:" + (0..<32).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
         let info = ImageInfo(
-            id: id,
+            id: fakeDigest,
             repository: ref.fullRepository,
             tag: ref.tag,
             size: 0,
             created: Date()
         )
-        try await store.save(info)
         return info
     }
 
+    // MARK: - Push
+
     /// Push an image to a registry.
     public func push(_ reference: String) async throws {
-        guard try await store.findByReference(reference) != nil else {
+        let normalized = try Self.normalize(reference)
+        guard (try? await imageStore.get(reference: normalized)) != nil else {
             throw MockerError.imageNotFound(reference)
         }
-        // TODO: Use Containerization framework to push
+        try await imageStore.push(reference: normalized, platform: .arm64)
     }
 
-    private func generateID() -> String {
-        let bytes = (0..<32).map { _ in UInt8.random(in: 0...255) }
-        return "sha256:" + bytes.map { String(format: "%02x", $0) }.joined()
+    // MARK: - Save / Load
+
+    /// Save images to an OCI tar archive.
+    public func save(references: [String], to outputPath: String) async throws {
+        let normalizedRefs = try references.map { try Self.normalize($0) }
+        let outputURL = URL(fileURLWithPath: outputPath)
+        try await imageStore.save(references: normalizedRefs, out: outputURL)
+    }
+
+    /// Load images from an OCI tar archive.
+    public func load(from inputPath: String) async throws -> [ImageInfo] {
+        let inputURL = URL(fileURLWithPath: inputPath)
+        let images = try await imageStore.load(from: inputURL)
+        return images.map(Self.toImageInfo)
+    }
+
+    // MARK: - Helpers
+
+    private static func normalize(_ reference: String) throws -> String {
+        // ContainerizationOCI.Reference.parse requires a fully-qualified reference with domain.
+        // Docker-style short references ("alpine", "nginx:1.25", "user/image:tag") need a domain.
+        var fullRef = reference
+        let parts = reference.split(separator: "/", maxSplits: 1)
+        if parts.count == 1 {
+            // No slash → single name like "alpine:latest"
+            fullRef = "docker.io/library/\(reference)"
+        } else {
+            let domain = String(parts[0])
+            // Domain must contain a dot, colon, or be "localhost"
+            let looksLikeDomain = domain.contains(".") || domain.contains(":") || domain == "localhost"
+            if !looksLikeDomain {
+                // e.g. "myuser/myimage:tag" — no domain, add docker.io
+                fullRef = "docker.io/\(reference)"
+            }
+        }
+        let ref = try ContainerizationOCI.Reference.parse(fullRef)
+        ref.normalize()
+        return ref.description
+    }
+
+    private static func toImageInfo(_ image: Containerization.Image) -> ImageInfo {
+        // Parse repo and tag from the reference string
+        let ref = try? ImageReference.parse(image.reference)
+        let repository = ref?.fullRepository ?? image.reference
+        let tag = ref?.tag ?? "latest"
+
+        return ImageInfo(
+            id: image.digest,
+            repository: repository,
+            tag: tag,
+            size: 0,         // Size requires reading all layer blobs — expensive
+            created: Date()  // Created requires reading image config — async
+        )
+    }
+}
+
+extension ContainerizationOCI.Platform {
+    static var arm64: ContainerizationOCI.Platform {
+        .init(arch: "arm64", os: "linux", variant: "v8")
     }
 }

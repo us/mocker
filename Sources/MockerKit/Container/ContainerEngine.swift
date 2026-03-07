@@ -1,75 +1,133 @@
 import Foundation
 
-/// Manages the lifecycle of containers using Apple's Containerization framework.
+/// Manages container lifecycle by delegating to Apple's `container` CLI.
+/// Image operations use Containerization.ImageStore directly.
+/// Container lifecycle uses `container` CLI subprocess (which has the required
+/// com.apple.security.virtualization entitlement via its own signing).
 public actor ContainerEngine {
     private let config: MockerConfig
     private let store: ContainerStore
+
+    private static let containerCLI = "/usr/local/bin/container"
 
     public init(config: MockerConfig = MockerConfig()) throws {
         self.config = config
         self.store = try ContainerStore(path: config.containersPath)
     }
 
-    // MARK: - Container Lifecycle
+    // MARK: - Run
 
-    /// Create and optionally start a container.
     public func run(_ containerConfig: ContainerConfig) async throws -> ContainerInfo {
-        let id = generateID()
         let name = containerConfig.name ?? generateName()
 
-        // Check for name conflicts
+        // Check for name conflicts in our store
         if let existing = try await store.findByName(name) {
             throw MockerError.containerAlreadyExists(existing.name)
         }
 
-        let info = ContainerInfo(
-            id: id,
-            name: name,
-            image: containerConfig.image,
-            state: .created,
-            status: "Created",
-            created: Date(),
-            ports: containerConfig.ports,
-            labels: containerConfig.labels,
-            command: containerConfig.command.joined(separator: " ")
-        )
+        // Build `container run` arguments
+        var args = ["run"]
 
+        args += ["--name", name]
+
+        // --rm handled by container CLI natively
+
+        for port in containerConfig.ports {
+            // Apple container CLI uses --volume for bind mounts and doesn't support port mapping
+            // directly — containers get their own IP via vmnet. We record ports as metadata only.
+            _ = port
+        }
+
+        for env in containerConfig.environment {
+            args += ["-e", "\(env.key)=\(env.value)"]
+        }
+
+        for vol in containerConfig.volumes {
+            if !vol.source.isEmpty {
+                args += ["-v", "\(vol.source):\(vol.destination)\(vol.readOnly ? ":ro" : "")"]
+            }
+        }
+
+        for (key, value) in containerConfig.labels {
+            _ = (key, value) // labels not supported by container CLI
+        }
+
+        if let workingDir = containerConfig.workingDir, !workingDir.isEmpty {
+            args += ["-w", workingDir]
+        }
+
+        // Detach by default (we track state)
+        args += ["-d"]
+
+        args.append(containerConfig.image)
+        args += containerConfig.command
+
+        let (output, exitCode) = try await runCLI(args)
+
+        guard exitCode == 0 else {
+            let msg = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw MockerError.operationFailed(msg.isEmpty ? "container run failed" : msg)
+        }
+
+        // output is the container ID/name
+        let assignedID = output.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Fetch real state from the container CLI
+        let info = try await fetchContainerInfo(id: assignedID, name: name, config: containerConfig)
         try await store.save(info)
-
-        // TODO: Use Containerization framework to actually create and start the container
-        // For now, we simulate the state transition
-        var running = info
-        running.state = .running
-        running.status = "Up Less than a second"
-        try await store.save(running)
-
-        return running
+        return info
     }
 
-    /// List containers, optionally including stopped ones.
+    // MARK: - List
+
     public func list(all: Bool = false) async throws -> [ContainerInfo] {
-        let containers = try await store.listAll()
+        // Get live state from container CLI
+        let (output, _) = try await runCLI(["ls"])
+        let liveIDs = parseLSOutput(output)
+
+        var containers = try await store.listAll()
+
+        // Update state for each container we're tracking
+        for i in containers.indices {
+            let c = containers[i]
+            if liveIDs.contains(c.name) || liveIDs.contains(c.id) {
+                containers[i].state = .running
+                containers[i].status = "Up"
+            } else if containers[i].state == .running {
+                containers[i].state = .exited
+                containers[i].status = "Exited (0)"
+                try await store.save(containers[i])
+            }
+        }
+
         if all {
             return containers
         }
         return containers.filter { $0.state.isActive }
     }
 
-    /// Stop a running container.
+    // MARK: - Stop
+
     public func stop(_ identifier: String) async throws -> ContainerInfo {
-        var container = try await resolve(identifier)
+        let container = try await resolve(identifier)
         guard container.state == .running else {
             throw MockerError.containerNotRunning(identifier)
         }
 
-        // TODO: Use Containerization framework to stop the container
-        container.state = .exited
-        container.status = "Exited (0)"
-        try await store.save(container)
-        return container
+        let (_, exitCode) = try await runCLI(["stop", container.name])
+        guard exitCode == 0 else {
+            throw MockerError.operationFailed("failed to stop container \(container.name)")
+        }
+
+        var updated = container
+        updated.state = .exited
+        updated.status = "Exited (0)"
+        try await store.save(updated)
+        return updated
     }
 
-    /// Remove a container.
+    // MARK: - Remove
+
     public func remove(_ identifier: String, force: Bool = false) async throws -> ContainerInfo {
         let container = try await resolve(identifier)
 
@@ -80,51 +138,166 @@ public actor ContainerEngine {
         }
 
         if container.state == .running {
-            _ = try await stop(identifier)
+            _ = try? await runCLI(["stop", container.name])
         }
 
+        _ = try? await runCLI(["delete", container.name])
         try await store.delete(container.id)
         return container
     }
 
-    /// Get logs for a container.
+    // MARK: - Logs
+
     public func logs(_ identifier: String, follow: Bool = false, tail: Int? = nil) async throws -> [String] {
         let container = try await resolve(identifier)
+        var args = ["logs", container.name]
+        if follow { args.append("-f") }
 
-        // TODO: Use Containerization framework to stream actual logs
-        return [
-            "[\(container.name)] Container started",
-            "[\(container.name)] Listening on port 80",
-        ]
+        let (output, _) = try await runCLI(args)
+        return output.components(separatedBy: "\n").filter { !$0.isEmpty }
     }
 
-    /// Execute a command inside a running container.
+    // MARK: - Exec
+
     public func exec(_ identifier: String, command: [String], interactive: Bool = false, tty: Bool = false) async throws {
         let container = try await resolve(identifier)
         guard container.state == .running else {
             throw MockerError.containerNotRunning(identifier)
         }
 
-        // TODO: Use Containerization framework to exec into container
-        print("Executing \(command.joined(separator: " ")) in container \(container.name)")
+        var args = ["exec"]
+        if interactive { args.append("-i") }
+        if tty { args.append("-t") }
+        args.append(container.name)
+        args += command
+
+        let (output, exitCode) = try await runCLI(args)
+        if !output.isEmpty { print(output) }
+        if exitCode != 0 {
+            throw MockerError.operationFailed("exec failed with exit code \(exitCode)")
+        }
     }
 
-    /// Inspect a container and return detailed JSON-serializable info.
+    // MARK: - Inspect
+
     public func inspect(_ identifier: String) async throws -> ContainerInfo {
         try await resolve(identifier)
     }
 
+    // MARK: - Stats
+
+    public func stats(containerIDs: [String]) async throws -> [(ContainerInfo, ContainerStats)] {
+        let containers: [ContainerInfo]
+        if containerIDs.isEmpty {
+            containers = try await list(all: false)
+        } else {
+            var resolved: [ContainerInfo] = []
+            for id in containerIDs { try await resolved.append(resolve(id)) }
+            containers = resolved
+        }
+        return containers.map { ($0, ContainerStats()) }
+    }
+
+    // MARK: - Start (stopped container)
+
+    public func start(_ identifier: String) async throws -> ContainerInfo {
+        let container = try await resolve(identifier)
+        guard container.state != .running else { return container }
+
+        let (_, exitCode) = try await runCLI(["start", container.name])
+        guard exitCode == 0 else {
+            throw MockerError.operationFailed("failed to start container \(container.name)")
+        }
+
+        var updated = container
+        updated.state = .running
+        updated.status = "Up"
+        try await store.save(updated)
+        return updated
+    }
+
     // MARK: - Private Helpers
 
-    /// Resolve an identifier (name or ID prefix) to a container.
     private func resolve(_ identifier: String) async throws -> ContainerInfo {
-        if let container = try await store.findByName(identifier) {
-            return container
-        }
-        if let container = try await store.findByIDPrefix(identifier) {
-            return container
-        }
+        if let container = try await store.findByName(identifier) { return container }
+        if let container = try await store.findByIDPrefix(identifier) { return container }
         throw MockerError.containerNotFound(identifier)
+    }
+
+    private func fetchContainerInfo(id: String, name: String, config: ContainerConfig) async throws -> ContainerInfo {
+        let (output, _) = try await runCLI(["inspect", name])
+
+        // Parse JSON from container inspect
+        if let data = output.data(using: .utf8),
+           let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+           let first = arr.first,
+           let cfg = first["configuration"] as? [String: Any] {
+            let status = first["status"] as? String ?? "running"
+            let networks = first["networks"] as? [[String: Any]] ?? []
+            let addr = networks.first?["address"] as? String ?? ""
+
+            return ContainerInfo(
+                id: (cfg["id"] as? String) ?? id,
+                name: (cfg["hostname"] as? String) ?? name,
+                image: config.image,
+                state: status == "running" ? .running : .exited,
+                status: status == "running" ? "Up Less than a second" : "Exited (0)",
+                created: Date(),
+                ports: config.ports,
+                labels: config.labels,
+                command: config.command.joined(separator: " "),
+                networkAddress: addr
+            )
+        }
+
+        // Fallback if inspect fails
+        return ContainerInfo(
+            id: id,
+            name: name,
+            image: config.image,
+            state: .running,
+            status: "Up Less than a second",
+            created: Date(),
+            ports: config.ports,
+            labels: config.labels,
+            command: config.command.joined(separator: " "),
+            networkAddress: ""
+        )
+    }
+
+    private func parseLSOutput(_ output: String) -> Set<String> {
+        var ids = Set<String>()
+        let lines = output.components(separatedBy: "\n").dropFirst() // skip header
+        for line in lines {
+            let cols = line.split(separator: " ", omittingEmptySubsequences: true)
+            if let id = cols.first.map(String.init) {
+                ids.insert(id)
+            }
+        }
+        return ids
+    }
+
+    @discardableResult
+    private func runCLI(_ arguments: [String]) async throws -> (String, Int32) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: Self.containerCLI)
+        process.arguments = arguments
+
+        let pipe = Pipe()
+        let errPipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = errPipe
+
+        try process.run()
+
+        return await withCheckedContinuation { continuation in
+            process.terminationHandler = { p in
+                let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                let err = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                let combined = out.isEmpty ? err : out
+                continuation.resume(returning: (combined, p.terminationStatus))
+            }
+        }
     }
 
     private func generateID() -> String {
@@ -135,8 +308,31 @@ public actor ContainerEngine {
     private func generateName() -> String {
         let adjectives = ["brave", "calm", "eager", "fancy", "happy", "jolly", "kind", "lively", "nice", "proud"]
         let nouns = ["alpine", "bay", "cedar", "dawn", "elm", "frost", "grove", "hill", "iris", "jade"]
-        let adj = adjectives.randomElement()!
-        let noun = nouns.randomElement()!
-        return "\(adj)_\(noun)"
+        return "\(adjectives.randomElement()!)_\(nouns.randomElement()!)"
+    }
+}
+
+// MARK: - Supporting types
+
+public struct ContainerStats: Sendable {
+    public var cpuPercent: Double = 0
+    public var memUsage: UInt64 = 0
+    public var memLimit: UInt64 = 0
+    public var netIn: UInt64 = 0
+    public var netOut: UInt64 = 0
+    public var blockIn: UInt64 = 0
+    public var blockOut: UInt64 = 0
+    public var pids: Int = 0
+}
+
+// MARK: - Async helpers
+
+extension Array {
+    func asyncMap<T>(_ transform: (Element) async throws -> T) async rethrows -> [T] {
+        var results: [T] = []
+        for element in self {
+            try await results.append(transform(element))
+        }
+        return results
     }
 }
