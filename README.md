@@ -1,6 +1,6 @@
-# Mocker
-
 <div align="center">
+
+# Mocker
 
 **A Docker-compatible container management tool built on Apple's Containerization framework**
 
