@@ -24,7 +24,7 @@ struct Build: AsyncParsableCommand {
         let manager = try ImageManager(config: config)
 
         print("Building \(tag)...")
-        let image = try await manager.build(tag: tag, context: context, dockerfile: file)
+        let image = try await manager.build(tag: tag, context: context, dockerfile: file, noCache: noCache)
         print("Successfully built \(image.shortID)")
         print("Successfully tagged \(tag)")
     }
