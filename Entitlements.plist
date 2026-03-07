@@ -2,6 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!-- VM entitlement required for Containerization.LinuxContainer/ContainerManager -->
+    <key>com.apple.security.virtualization</key>
+    <true/>
     <!-- Network access for pulling/pushing images from/to registries -->
     <key>com.apple.security.network.client</key>
     <true/>

@@ -4,6 +4,11 @@ import Foundation
 /// Image operations use Containerization.ImageStore directly.
 /// Container lifecycle uses `container` CLI subprocess (which has the required
 /// com.apple.security.virtualization entitlement via its own signing).
+///
+/// Note: Direct `LinuxContainer`/`ContainerManager` integration was attempted but requires
+/// a vminit image that matches the open-source framework version (0.26.x). Apple's public
+/// container CLI uses vminit:0.1.0 which is incompatible with the main branch framework.
+/// See PROGRESS.md for details.
 public actor ContainerEngine {
     private let config: MockerConfig
     private let store: ContainerStore
@@ -30,14 +35,6 @@ public actor ContainerEngine {
 
         args += ["--name", name]
 
-        // --rm handled by container CLI natively
-
-        for port in containerConfig.ports {
-            // Apple container CLI uses --volume for bind mounts and doesn't support port mapping
-            // directly — containers get their own IP via vmnet. We record ports as metadata only.
-            _ = port
-        }
-
         for env in containerConfig.environment {
             args += ["-e", "\(env.key)=\(env.value)"]
         }
@@ -46,10 +43,6 @@ public actor ContainerEngine {
             if !vol.source.isEmpty {
                 args += ["-v", "\(vol.source):\(vol.destination)\(vol.readOnly ? ":ro" : "")"]
             }
-        }
-
-        for (key, value) in containerConfig.labels {
-            _ = (key, value) // labels not supported by container CLI
         }
 
         if let workingDir = containerConfig.workingDir, !workingDir.isEmpty {
