@@ -1,0 +1,89 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    name: Build macOS binary
+    runs-on: macos-15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Build release binary
+        run: |
+          swift build -c release --product mocker
+          strip .build/release/mocker
+
+      - name: Create tarball
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          tar -czf "mocker-${VERSION}-arm64-apple-macosx.tar.gz" \
+            -C .build/release mocker
+          echo "TARBALL=mocker-${VERSION}-arm64-apple-macosx.tar.gz" >> $GITHUB_ENV
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+
+      - name: Compute SHA256
+        run: |
+          SHA256=$(shasum -a 256 "$TARBALL" | awk '{print $1}')
+          echo "SHA256=${SHA256}" >> $GITHUB_ENV
+          echo "SHA256: ${SHA256}"
+
+      - name: Upload binary to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.TARBALL }}
+
+      - name: Update Homebrew formula
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          FORMULA_URL="https://github.com/${{ github.repository }}/releases/download/${VERSION}/${TARBALL}"
+
+          git clone https://x-access-token:${GH_TOKEN}@github.com/us/homebrew-tap.git /tmp/homebrew-tap
+          cd /tmp/homebrew-tap
+
+          cat > Formula/mocker.rb << EOF
+          class Mocker < Formula
+            desc "Docker-compatible container CLI built on Apple's Containerization framework"
+            homepage "https://github.com/us/mocker"
+            url "${FORMULA_URL}"
+            sha256 "${SHA256}"
+            license "MIT"
+            version "${VERSION#v}"
+
+            def install
+              bin.install "mocker"
+            end
+
+            def caveats
+              <<~EOS
+                Mocker requires Apple's container CLI to be installed:
+                  https://github.com/apple/container
+
+                macOS 26+ and Apple Silicon are required.
+              EOS
+            end
+
+            test do
+              assert_match "${VERSION#v}", shell_output("#{bin}/mocker --version")
+            end
+          end
+          EOF
+
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+          git add Formula/mocker.rb
+          git commit -m "chore: update mocker to ${VERSION}"
+          git push
