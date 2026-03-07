@@ -39,26 +39,20 @@ Mocker is a **Docker-compatible CLI + Compose + MenuBar GUI** tool that runs nat
 
 ## Installation
 
+### Homebrew (Recommended)
+
+```bash
+brew tap us/tap
+brew install mocker
+```
+
 ### Build from Source
 
 ```bash
-git clone https://github.com/yourname/mocker.git
+git clone https://github.com/us/mocker.git
 cd mocker
 swift build -c release
-```
-
-Install the binary:
-
-```bash
 cp .build/release/mocker /usr/local/bin/mocker
-```
-
-### Swift Package Manager
-
-Add to your `Package.swift`:
-
-```swift
-.package(url: "https://github.com/yourname/mocker.git", from: "0.1.0")
 ```
 
 ## Quick Start
