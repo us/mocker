@@ -12,6 +12,8 @@ import Foundation
 public actor ContainerEngine {
     private let config: MockerConfig
     private let store: ContainerStore
+    /// Active port proxies keyed by container ID.
+    private var proxies: [String: PortProxy] = [:]
 
     private static let containerCLI = "/usr/local/bin/container"
 
@@ -68,6 +70,15 @@ public actor ContainerEngine {
         // Fetch real state from the container CLI
         let info = try await fetchContainerInfo(id: assignedID, name: name, config: containerConfig)
         try await store.save(info)
+
+        // Start port proxies if -p mappings were requested and we got an IP
+        if !containerConfig.ports.isEmpty, !info.networkAddress.isEmpty {
+            let containerIP = info.networkAddress.split(separator: "/").first.map(String.init) ?? info.networkAddress
+            let proxy = PortProxy()
+            try? await proxy.start(ports: containerConfig.ports, containerIP: containerIP)
+            proxies[info.id] = proxy
+        }
+
         return info
     }
 
@@ -112,6 +123,11 @@ public actor ContainerEngine {
             throw MockerError.operationFailed("failed to stop container \(container.name)")
         }
 
+        // Stop port proxy if running
+        if let proxy = proxies.removeValue(forKey: container.id) {
+            await proxy.stop()
+        }
+
         var updated = container
         updated.state = .exited
         updated.status = "Exited (0)"
@@ -132,6 +148,10 @@ public actor ContainerEngine {
 
         if container.state == .running {
             _ = try? await runCLI(["stop", container.name])
+        }
+
+        if let proxy = proxies.removeValue(forKey: container.id) {
+            await proxy.stop()
         }
 
         _ = try? await runCLI(["delete", container.name])
