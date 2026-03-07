@@ -58,10 +58,16 @@ public struct MockerConfig: Codable, Sendable {
         return nil
     }
 
+    /// vminit image reference used by ContainerManager to boot VMs.
+    public static let vminitReference = "ghcr.io/apple/containerization/vminit:0.1.0"
+
+    /// Directory for container log files.
+    public var logsPath: String { "\(dataRoot)/logs" }
+
     /// Ensure all required directories exist.
     public func ensureDirectories() throws {
         let fm = FileManager.default
-        let dirs = [dataRoot, containersPath, volumesPath, networksPath, ociStorePath.path]
+        let dirs = [dataRoot, containersPath, volumesPath, networksPath, ociStorePath.path, logsPath]
         for dir in dirs {
             if !fm.fileExists(atPath: dir) {
                 try fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
