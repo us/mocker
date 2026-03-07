@@ -64,10 +64,13 @@ public struct MockerConfig: Codable, Sendable {
     /// Directory for container log files.
     public var logsPath: String { "\(dataRoot)/logs" }
 
+    /// Directory for port proxy PID files.
+    public var proxiesPath: String { "\(dataRoot)/proxies" }
+
     /// Ensure all required directories exist.
     public func ensureDirectories() throws {
         let fm = FileManager.default
-        let dirs = [dataRoot, containersPath, volumesPath, networksPath, ociStorePath.path, logsPath]
+        let dirs = [dataRoot, containersPath, volumesPath, networksPath, ociStorePath.path, logsPath, proxiesPath]
         for dir in dirs {
             if !fm.fileExists(atPath: dir) {
                 try fm.createDirectory(atPath: dir, withIntermediateDirectories: true)

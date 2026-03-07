@@ -12,14 +12,14 @@ import Foundation
 public actor ContainerEngine {
     private let config: MockerConfig
     private let store: ContainerStore
-    /// Active port proxies keyed by container ID.
-    private var proxies: [String: PortProxy] = [:]
+    private let portProxy: PortProxy
 
     private static let containerCLI = "/usr/local/bin/container"
 
     public init(config: MockerConfig = MockerConfig()) throws {
         self.config = config
         self.store = try ContainerStore(path: config.containersPath)
+        self.portProxy = PortProxy(proxiesDir: config.proxiesPath)
     }
 
     // MARK: - Run
@@ -73,10 +73,11 @@ public actor ContainerEngine {
 
         // Start port proxies if -p mappings were requested and we got an IP
         if !containerConfig.ports.isEmpty, !info.networkAddress.isEmpty {
-            let containerIP = info.networkAddress.split(separator: "/").first.map(String.init) ?? info.networkAddress
-            let proxy = PortProxy()
-            try? await proxy.start(ports: containerConfig.ports, containerIP: containerIP)
-            proxies[info.id] = proxy
+            try? await portProxy.start(
+                containerID: info.id,
+                ports: containerConfig.ports,
+                containerIP: info.networkAddress
+            )
         }
 
         return info
@@ -123,10 +124,7 @@ public actor ContainerEngine {
             throw MockerError.operationFailed("failed to stop container \(container.name)")
         }
 
-        // Stop port proxy if running
-        if let proxy = proxies.removeValue(forKey: container.id) {
-            await proxy.stop()
-        }
+        await portProxy.stop(containerID: container.id)
 
         var updated = container
         updated.state = .exited
@@ -150,9 +148,7 @@ public actor ContainerEngine {
             _ = try? await runCLI(["stop", container.name])
         }
 
-        if let proxy = proxies.removeValue(forKey: container.id) {
-            await proxy.stop()
-        }
+        await portProxy.stop(containerID: container.id)
 
         _ = try? await runCLI(["delete", container.name])
         try await store.delete(container.id)

@@ -1,64 +1,65 @@
 import Foundation
-import Network
 
-/// Forwards TCP connections from localhost:hostPort to containerIP:containerPort.
-/// One instance per port mapping, runs as a background process via `socat` or
-/// falls back to a pure-Swift NWListener proxy.
+/// Manages persistent port-forwarding subprocesses for a container.
+/// Spawns a detached `mocker __proxy` process per port mapping that outlives the CLI invocation.
+/// PIDs are stored in `~/.mocker/proxies/<containerID>/` so they can be killed on stop/rm.
 public actor PortProxy {
-    private var listeners: [NWListener] = []
+    private let proxiesDir: String
 
-    public init() {}
+    public init(proxiesDir: String) {
+        self.proxiesDir = proxiesDir
+    }
 
-    /// Start forwarding for all port mappings once the container's IP is known.
-    public func start(ports: [PortMapping], containerIP: String) async throws {
+    /// Spawn background proxy processes for each port mapping.
+    public func start(containerID: String, ports: [PortMapping], containerIP: String) throws {
+        let dir = "\(proxiesDir)/\(containerID)"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+
+        // Find the mocker binary path (same binary we're running from)
+        guard let mockerPath = Bundle.main.executablePath ?? ProcessInfo.processInfo.arguments.first.map({ URL(fileURLWithPath: $0).path }),
+              FileManager.default.fileExists(atPath: mockerPath) else {
+            return
+        }
+
+        let rawIP = containerIP.split(separator: "/").first.map(String.init) ?? containerIP
+
         for port in ports {
             guard port.hostPort > 0, port.containerPort > 0 else { continue }
-            try await startForwarding(
-                hostPort: UInt16(port.hostPort),
-                containerIP: containerIP,
-                containerPort: UInt16(port.containerPort)
-            )
+
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: mockerPath)
+            process.arguments = [
+                "__proxy",
+                "--host-port", "\(port.hostPort)",
+                "--container-ip", rawIP,
+                "--container-port", "\(port.containerPort)"
+            ]
+            // Detach from parent — proxy outlives CLI
+            process.standardInput = FileHandle.nullDevice
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+
+            try process.run()
+
+            // Save PID so we can kill it later
+            let pidFile = "\(dir)/\(port.hostPort).pid"
+            try "\(process.processIdentifier)".write(toFile: pidFile, atomically: true, encoding: .utf8)
         }
     }
 
-    /// Stop all listeners.
-    public func stop() {
-        for listener in listeners { listener.cancel() }
-        listeners.removeAll()
-    }
+    /// Kill all proxy processes for a container.
+    public func stop(containerID: String) {
+        let dir = "\(proxiesDir)/\(containerID)"
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir) else { return }
 
-    private func startForwarding(hostPort: UInt16, containerIP: String, containerPort: UInt16) async throws {
-        let params = NWParameters.tcp
-        params.allowLocalEndpointReuse = true
-
-        guard let port = NWEndpoint.Port(rawValue: hostPort) else { return }
-        let listener = try NWListener(using: params, on: port)
-
-        listener.newConnectionHandler = { inbound in
-            inbound.start(queue: .global())
-            let outboundHost = NWEndpoint.Host(containerIP)
-            guard let outboundPort = NWEndpoint.Port(rawValue: containerPort) else { return }
-            let outbound = NWConnection(host: outboundHost, port: outboundPort, using: .tcp)
-            outbound.start(queue: .global())
-            Self.pipe(inbound, outbound)
-            Self.pipe(outbound, inbound)
-        }
-
-        listener.start(queue: .global())
-        listeners.append(listener)
-    }
-
-    /// Relay data in one direction between two connections.
-    private static func pipe(_ from: NWConnection, _ to: NWConnection) {
-        from.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, isComplete, error in
-            if let data, !data.isEmpty {
-                to.send(content: data, completion: .contentProcessed { _ in })
+        for file in files where file.hasSuffix(".pid") {
+            let pidFile = "\(dir)/\(file)"
+            if let pidStr = try? String(contentsOfFile: pidFile, encoding: .utf8),
+               let pid = Int32(pidStr.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                kill(pid, SIGTERM)
             }
-            if isComplete || error != nil {
-                to.cancel()
-                return
-            }
-            pipe(from, to)
+            try? FileManager.default.removeItem(atPath: pidFile)
         }
+        try? FileManager.default.removeItem(atPath: dir)
     }
 }
