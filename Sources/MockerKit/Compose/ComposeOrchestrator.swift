@@ -55,12 +55,20 @@ public actor ComposeOrchestrator {
 
         // Start services in dependency order
         let order = composeFile.serviceOrder()
+        var startedContainers: [(serviceName: String, info: ContainerInfo)] = []
+
         for serviceName in order {
             guard let service = composeFile.services[serviceName] else { continue }
-            try await startService(service, detach: detach)
+            let info = try await startService(service, detach: detach)
             let containerName = "\(projectName)-\(service.name)-1"
+            startedContainers.append((serviceName: serviceName, info: info))
             events.append(.containerStarted(containerName))
         }
+
+        // Inject inter-service hostnames into /etc/hosts of each container.
+        // All containers share the same vmnet subnet and can reach each other by IP.
+        // We add /etc/hosts entries so service names resolve (e.g. "db" → 192.168.64.6).
+        await injectServiceHostnames(startedContainers)
 
         return events
     }
@@ -122,23 +130,49 @@ public actor ComposeOrchestrator {
         }
 
         // Recreate services
+        var restarted: [(serviceName: String, info: ContainerInfo)] = []
         if let service, let svc = composeFile.services[service] {
-            try await startService(svc, detach: true)
+            let info = try await startService(svc, detach: true)
+            restarted.append((serviceName: service, info: info))
             events.append(.containerStarted("\(projectName)-\(service)-1"))
         } else {
             for serviceName in composeFile.serviceOrder() {
                 guard let svc = composeFile.services[serviceName] else { continue }
-                try await startService(svc, detach: true)
+                let info = try await startService(svc, detach: true)
+                restarted.append((serviceName: serviceName, info: info))
                 events.append(.containerStarted("\(projectName)-\(serviceName)-1"))
             }
         }
+        await injectServiceHostnames(restarted)
 
         return events
     }
 
     // MARK: - Private
 
-    private func startService(_ service: ComposeService, detach: Bool) async throws {
+    /// Inject other services' IPs into /etc/hosts of each running container.
+    /// This enables service-name DNS resolution (e.g. "db:5432") in compose projects.
+    private func injectServiceHostnames(_ containers: [(serviceName: String, info: ContainerInfo)]) async {
+        // Only containers with a known IP can participate
+        let withIP = containers.filter { !$0.info.networkAddress.isEmpty }
+        guard withIP.count > 1 else { return }
+
+        for target in withIP {
+            // Build /etc/hosts lines for all *other* services
+            let entries = withIP
+                .filter { $0.serviceName != target.serviceName }
+                .map { "\($0.info.networkAddress) \($0.serviceName)" }
+                .joined(separator: "\n")
+
+            guard !entries.isEmpty else { continue }
+
+            // Append to /etc/hosts — silently ignore failures (container may not have sh)
+            let cmd = "printf '\\n\(entries)\\n' >> /etc/hosts"
+            try? await engine.exec(target.info.id, command: ["sh", "-c", cmd])
+        }
+    }
+
+    private func startService(_ service: ComposeService, detach: Bool) async throws -> ContainerInfo {
         let containerName = "\(projectName)-\(service.name)-1"
 
         // Pull or build image
@@ -175,6 +209,6 @@ public actor ComposeOrchestrator {
             hostname: service.hostname
         )
 
-        _ = try await engine.run(config)
+        return try await engine.run(config)
     }
 }
