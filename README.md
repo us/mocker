@@ -35,7 +35,7 @@ Mocker is a **Docker-compatible CLI + Compose + MenuBar GUI** tool that runs nat
 | Swift | 6.0+ |
 | Xcode | 16.0+ |
 
-> **Note:** The Apple Containerization framework requires macOS 26. On earlier versions, the CLI works with placeholder implementations (marked with `// TODO:` comments).
+> **Note:** The Apple Containerization framework requires macOS 26 on Apple Silicon. Intel Macs are not supported.
 
 ## Installation
 
@@ -322,18 +322,36 @@ swift test --filter MockerKitTests
 swift run mocker --help
 ```
 
+## How It Works
+
+Mocker delegates to Apple's `container` CLI for container lifecycle (run, stop, exec, logs, build).
+Image operations (pull, list, tag, rmi) use `Containerization.ImageStore` directly. This hybrid
+approach gives you a fully working Docker-compatible tool on macOS 26 today:
+
+| Operation | Backend |
+|-----------|---------|
+| `run`, `stop`, `exec`, `logs` | `/usr/local/bin/container` subprocess |
+| `build` | `container build` with live streaming output |
+| `pull`, `push`, `tag`, `rmi` | `Containerization.ImageStore` (direct framework) |
+| `images` | Apple CLI image store (shows all pulled + built images) |
+| `stats` | VM process RSS/CPU via `ps` (VirtualMachine.xpc matching) |
+| Port mapping `-p` | Persistent `mocker __proxy` subprocess per port |
+
 ## Roadmap
 
 - [x] Full Docker CLI command set
 - [x] Docker Compose v2 support
 - [x] Network & Volume management
 - [x] MenuBar GUI skeleton
-- [ ] Real container execution via Apple Containerization framework (macOS 26)
-- [ ] Image layer caching
-- [ ] BuildKit integration
+- [x] Real container execution on macOS 26 (via Apple `container` CLI)
+- [x] `mocker build` — delegates to `container build` with live output
+- [x] `mocker stats` — real CPU% and memory from VM process
+- [x] Port mapping (`-p`) — userspace TCP proxy subprocess
 - [ ] Registry authentication (`mocker login`)
 - [ ] `mocker compose --scale`
 - [ ] MenuBar live container metrics
+- [ ] Image layer size reporting
+- [ ] Direct Containerization framework integration (pending vminit compatibility)
 
 ## Contributing
 
