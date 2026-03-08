@@ -17,6 +17,24 @@
 
 Mocker is a **Docker-compatible CLI + Compose + MenuBar GUI** tool that runs natively on macOS using Apple's [Containerization](https://developer.apple.com/documentation/containerization) framework (macOS 26+). It speaks the same language as Docker — same commands, same flags, same output format — so your existing scripts and muscle memory just work.
 
+## Just replace `docker` with `mocker`
+
+```bash
+# Before
+docker compose up -d
+docker ps
+docker logs my-app
+docker exec -it my-app sh
+
+# After — same commands, native Apple runtime, no Docker Desktop
+mocker compose up -d
+mocker ps
+mocker logs my-app
+mocker exec -it my-app sh
+```
+
+Your existing `docker-compose.yml` works as-is.
+
 ## Features
 
 - **Full Docker CLI compatibility** — `run`, `ps`, `stop`, `rm`, `exec`, `logs`, `build`, `pull`, `push`, `images`, `tag`, `rmi`, `inspect`, `stats`
