@@ -77,10 +77,18 @@ struct ComposeUp: AsyncParsableCommand {
     @Flag(name: .shortAndLong, help: "Run containers in the background")
     var detach = false
 
+    @Argument(help: "Services to start (starts all if omitted)")
+    var services: [String] = []
+
     func run() async throws {
-        let (composeFile, project) = try options.loadCompose()
+        var (composeFile, project) = try options.loadCompose()
         let config = MockerConfig()
         try config.ensureDirectories()
+
+        // Filter to requested services only
+        if !services.isEmpty {
+            composeFile = composeFile.filtering(services: services)
+        }
 
         let engine = try ContainerEngine(config: config)
         let imageManager = try ImageManager(config: config)
@@ -108,6 +116,12 @@ struct ComposeDown: AsyncParsableCommand {
     )
 
     @OptionGroup var options: ComposeOptions
+
+    @Flag(name: .customLong("remove-orphans"), help: "Remove containers for services not defined in the Compose file")
+    var removeOrphans = false
+
+    @Flag(name: .shortAndLong, help: "Remove named volumes")
+    var volumes = false
 
     func run() async throws {
         let (composeFile, project) = try options.loadCompose()
