@@ -1,18 +1,12 @@
+---
+title: Architecture
+---
+
 # Architecture
 
 This document explains how Mocker is structured, the design decisions behind it, and how the components interact.
 
-## Table of Contents
-
-- [Overview](#overview)
-- [Module Structure](#module-structure)
-- [MockerKit — Core Library](#mockerkit--core-library)
-- [Mocker — CLI](#mocker--cli)
-- [MockerApp — MenuBar GUI](#mockerapp--menubar-gui)
-- [Data Flow](#data-flow)
-- [Concurrency Model](#concurrency-model)
-- [Persistence](#persistence)
-- [Apple Containerization Integration](#apple-containerization-integration)
+---
 
 ## Overview
 
@@ -21,7 +15,7 @@ Mocker is composed of three Swift Package Manager targets:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        MockerApp                            │
-│              SwiftUI MenuBar GUI (macOS 26+)                │
+│         SwiftUI MenuBar GUI (macOS 26+) — coming soon       │
 └──────────────────────┬──────────────────────────────────────┘
                        │ imports
 ┌──────────────────────▼──────────────────────────────────────┐
@@ -36,6 +30,8 @@ Mocker is composed of three Swift Package Manager targets:
 ```
 
 Both `Mocker` (CLI) and `MockerApp` (GUI) depend on `MockerKit`. The core library never imports UI frameworks, keeping it independently testable.
+
+---
 
 ## Module Structure
 
@@ -63,7 +59,7 @@ Sources/
 │   ├── Volume/
 │   │   └── VolumeManager.swift      # actor: create/list/remove
 │   └── Compose/
-│       ├── ComposeFile.swift        # Yams-based YAML parser
+│       ├── ComposeFile.swift        # Yams-based YAML parser + variable substitution
 │       └── ComposeOrchestrator.swift # actor: up/down/ps/restart
 │
 ├── Mocker/
@@ -102,6 +98,8 @@ Sources/
         └── ComposeProjectsView.swift
 ```
 
+---
+
 ## MockerKit — Core Library
 
 ### Engines and Managers
@@ -136,7 +134,6 @@ public struct ContainerConfig: Codable {
     public var labels: [String: String]
     public var restartPolicy: RestartPolicy
     public var network: String?
-    public var autoRemove: Bool
 }
 ```
 
@@ -175,10 +172,11 @@ Error response from daemon: Conflict. The container name "/myapp" is already in 
 
 `ComposeOrchestrator` coordinates all resources for a project:
 
-1. Parse `docker-compose.yml` via `ComposeFile`
+1. Parse `docker-compose.yml` via `ComposeFile` (including `.env` variable substitution)
 2. Topological sort of services (respects `depends_on`)
 3. Create networks → create volumes → start services in order
-4. Emit `[ComposeEvent]` for progress reporting
+4. Skip builds when image already exists (like `docker compose up` without `--build`)
+5. Emit `ComposeEvent` values for progress reporting
 
 ```swift
 public enum ComposeEvent {
@@ -191,6 +189,8 @@ public enum ComposeEvent {
     case networkRemoved(String)
 }
 ```
+
+---
 
 ## Mocker — CLI
 
@@ -207,8 +207,6 @@ struct MockerCLI: AsyncParsableCommand {
 ```
 
 ### Command Pattern
-
-Each command follows this pattern:
 
 ```swift
 struct Run: AsyncParsableCommand {
@@ -238,9 +236,11 @@ TableFormatter.printJSONArray(value)   // → [{...}]
 TableFormatter.printJSON(value)        // → {...}
 ```
 
+---
+
 ## MockerApp — MenuBar GUI
 
-> Currently a skeleton. Full implementation requires macOS 26 with Apple Containerization framework.
+> Currently a skeleton. Full implementation coming soon.
 
 ```
 MenuBarExtra (SwiftUI)
@@ -252,6 +252,8 @@ MenuBarExtra (SwiftUI)
 
 The `AppViewModel` is `@MainActor`-isolated and polls MockerKit actors for live updates.
 
+---
+
 ## Data Flow
 
 ### `mocker run -d --name web nginx:latest`
@@ -259,19 +261,17 @@ The `AppViewModel` is `@MainActor`-isolated and polls MockerKit actors for live 
 ```
 CLI Run.run()
   │
-  ├─ ContainerConfig (parse flags: name="web", image="nginx:latest", detach=true)
+  ├─ ContainerConfig (name="web", image="nginx:latest", detach=true)
   │
   └─ ContainerEngine.run(config)
         │
         ├─ ContainerStore.findByName("web")  → nil (no conflict)
         │
-        ├─ TODO: Apple Containerization → start actual container process
+        ├─ Apple container CLI → start container VM
         │
-        ├─ ContainerInfo(id: randomID, name: "web", state: .running, ...)
+        ├─ ContainerInfo(id: assignedID, name: "web", state: .running, ...)
         │
         └─ ContainerStore.save(info)  → ~/.mocker/containers/<id>.json
-              │
-              └─ print(info.id)  → "b8482c2a83c8..."
 ```
 
 ### `mocker compose up -d`
@@ -279,21 +279,22 @@ CLI Run.run()
 ```
 ComposeUp.run()
   │
-  ├─ ComposeFile.load("docker-compose.yml")  → ComposeFile
+  ├─ ComposeFile.load("docker-compose.yml")
+  │     └─ loadDotEnv(".env") + substituteVariables()
   │
-  ├─ ComposeOrchestrator.up(composeFile, detach: true)
-  │     │
-  │     ├─ serviceOrder()  → topological sort → [db, api, web]
-  │     │
-  │     ├─ NetworkManager.create("project-backend")  → ComposeEvent.networkCreated
-  │     ├─ VolumeManager.create("project-pgdata")    → ComposeEvent.volumeCreated
-  │     │
-  │     ├─ ContainerEngine.run(dbConfig)   → ComposeEvent.containerStarted("project-db-1")
-  │     ├─ ContainerEngine.run(apiConfig)  → ComposeEvent.containerStarted("project-api-1")
-  │     └─ ContainerEngine.run(webConfig)  → ComposeEvent.containerStarted("project-web-1")
-  │
-  └─ ComposeFormatter.printEvents(events, total: 5)
+  └─ ComposeOrchestrator.up(composeFile, detach: true)
+        │
+        ├─ serviceOrder()  → topological sort → [db, api, web]
+        │
+        ├─ NetworkManager.create("project-backend")   → ComposeEvent.networkCreated
+        ├─ VolumeManager.create("project-pgdata")     → ComposeEvent.volumeCreated
+        │
+        ├─ ContainerEngine.run(dbConfig)   → ComposeEvent.containerStarted("project-db-1")
+        ├─ ContainerEngine.run(apiConfig)  → ComposeEvent.containerStarted("project-api-1")
+        └─ ContainerEngine.run(webConfig)  → ComposeEvent.containerStarted("project-web-1")
 ```
+
+---
 
 ## Concurrency Model
 
@@ -308,10 +309,12 @@ Mocker uses Swift 6 strict concurrency throughout:
 | `NetworkManager` | `actor` |
 | `VolumeManager` | `actor` |
 | `ComposeOrchestrator` | `actor` |
-| CLI commands | `async` functions (run on cooperative thread pool) |
+| CLI commands | `async` functions (cooperative thread pool) |
 | `AppViewModel` | `@MainActor` |
 
 All cross-actor calls use `await`. No shared mutable state outside actors.
+
+---
 
 ## Persistence
 
@@ -335,17 +338,19 @@ State is stored as JSON files under `~/.mocker/`:
 
 Stores load all JSON files from their directory on init. No database, no daemon — just files.
 
+---
+
 ## Apple Containerization Integration
 
-All actual container operations are marked with `// TODO:` comments and currently use placeholder implementations. On macOS 26, these will be replaced with calls to the Apple Containerization framework:
+Container lifecycle delegates to Apple's `container` CLI subprocess. Image operations use `Containerization.ImageStore` directly.
 
-```swift
-// TODO: Use Containerization framework to actually pull the image
-// Replace with: try await Container.Image.pull(reference)
+| Operation | Backend |
+|-----------|---------|
+| `run`, `stop`, `exec`, `logs` | `/usr/local/bin/container` subprocess |
+| `build` | `container build` with live streaming output |
+| `pull`, `push`, `tag`, `rmi` | `Containerization.ImageStore` (direct framework) |
+| `images` | Apple CLI image store (shows all pulled + built images) |
+| `stats` | VM process RSS/CPU via `ps` (VirtualMachine.xpc matching) |
+| Port mapping `-p` | Persistent `mocker __proxy` subprocess per port |
 
-// TODO: Use Containerization framework to start the container
-// Replace with: let container = try await Container(config: ...)
-//               try await container.start()
-```
-
-The placeholder layer means the CLI is fully functional for testing and development on macOS < 26, with all state management, error handling, and output formatting working correctly.
+This hybrid approach gives a fully working Docker-compatible tool on macOS 26 today, with the option to deepen framework integration over time.

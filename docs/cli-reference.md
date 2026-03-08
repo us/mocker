@@ -1,47 +1,10 @@
+---
+title: CLI Reference
+---
+
 # CLI Reference
 
 Complete reference for all Mocker commands and flags.
-
-## Table of Contents
-
-- [Global Options](#global-options)
-- [Container Commands](#container-commands)
-  - [run](#run)
-  - [ps](#ps)
-  - [stop](#stop)
-  - [rm](#rm)
-  - [exec](#exec)
-  - [logs](#logs)
-  - [inspect](#inspect)
-  - [stats](#stats)
-- [Image Commands](#image-commands)
-  - [pull](#pull)
-  - [push](#push)
-  - [images](#images)
-  - [build](#build)
-  - [tag](#tag)
-  - [rmi](#rmi)
-- [Network Commands](#network-commands)
-  - [network create](#network-create)
-  - [network ls](#network-ls)
-  - [network rm](#network-rm)
-  - [network inspect](#network-inspect)
-  - [network connect](#network-connect)
-  - [network disconnect](#network-disconnect)
-- [Volume Commands](#volume-commands)
-  - [volume create](#volume-create)
-  - [volume ls](#volume-ls)
-  - [volume rm](#volume-rm)
-  - [volume inspect](#volume-inspect)
-- [Compose Commands](#compose-commands)
-  - [compose up](#compose-up)
-  - [compose down](#compose-down)
-  - [compose ps](#compose-ps)
-  - [compose logs](#compose-logs)
-  - [compose restart](#compose-restart)
-- [System Commands](#system-commands)
-  - [system info](#system-info)
-  - [system prune](#system-prune)
 
 ---
 
@@ -59,91 +22,62 @@ Options:
 
 ## Container Commands
 
-### run
+### `mocker run`
 
 Create and start a new container.
 
-```
+```bash
 mocker run [OPTIONS] IMAGE [COMMAND [ARG...]]
 ```
 
-**Options:**
-
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--detach` | `-d` | Run container in background, print container ID |
-| `--name` | | Assign a name to the container |
-| `--publish` | `-p` | Publish a container's port(s) to the host (`host:container[/proto]`) |
-| `--env` | `-e` | Set environment variables |
-| `--volume` | `-v` | Bind mount a volume (`host:container[:ro]` or named `vol:container`) |
-| `--label` | `-l` | Set metadata on a container |
-| `--restart` | | Restart policy (`no`, `always`, `on-failure`, `unless-stopped`) |
-| `--network` | | Connect a container to a network |
-| `--rm` | | Automatically remove the container when it exits |
+**Flags:**
+```
+-d, --detach          Run container in background
+    --name            Assign a name to the container
+-p, --publish         Publish a port (host:container[/proto])
+-e, --env             Set environment variables
+-v, --volume          Bind mount a volume (host:container[:ro])
+-l, --label           Set metadata on a container
+    --restart         Restart policy (no|always|on-failure|unless-stopped)
+    --network         Connect to a network
+    --rm              Remove the container when it exits
+```
 
 **Examples:**
-
 ```bash
-# Simple run
-mocker run alpine:latest
-
 # Detached with name and port
 mocker run -d --name web -p 8080:80 nginx:latest
 
 # With environment variables
 mocker run -d -e DB_HOST=localhost -e DB_PORT=5432 myapp:latest
 
-# With bind mount (read-only)
+# With bind mount
 mocker run -d -v /host/config:/app/config:ro myapp:latest
-
-# With named volume
-mocker run -d -v pgdata:/var/lib/postgresql/data postgres:15
 
 # With restart policy
 mocker run -d --restart always --name db postgres:15
-
-# Multiple ports
-mocker run -d -p 80:80 -p 443:443 -p 8080:8080 nginx:latest
 ```
-
-**Port format:** `[hostIP:]hostPort:containerPort[/protocol]`
-- `8080:80` → host port 8080 maps to container port 80 (TCP)
-- `8080:80/udp` → UDP protocol
-- `127.0.0.1:8080:80` → bind to specific host IP
 
 ---
 
-### ps
+### `mocker ps`
 
 List containers.
 
-```
+```bash
 mocker ps [OPTIONS]
 ```
 
-**Options:**
-
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--all` | `-a` | Show all containers (default shows only running) |
-| `--quiet` | `-q` | Only display container IDs |
-
-**Output columns:**
-
+**Flags:**
 ```
-CONTAINER ID   IMAGE   COMMAND   CREATED   STATUS   PORTS   NAMES
+-a, --all     Show all containers (default: only running)
+-q, --quiet   Only display container IDs
 ```
 
 **Examples:**
-
 ```bash
-# Running containers only
 mocker ps
-
-# All containers (including stopped)
 mocker ps -a
-
-# IDs only (useful for scripting)
 mocker ps -q
 
 # Stop all running containers
@@ -152,21 +86,18 @@ mocker stop $(mocker ps -q)
 
 ---
 
-### stop
+### `mocker stop`
 
 Stop one or more running containers.
 
-```
+```bash
 mocker stop CONTAINER [CONTAINER...]
 ```
 
-Echoes back each container identifier on success.
-
 **Examples:**
-
 ```bash
 mocker stop myapp
-mocker stop container1 container2 container3
+mocker stop container1 container2
 
 # Stop all running containers
 mocker stop $(mocker ps -q)
@@ -174,85 +105,66 @@ mocker stop $(mocker ps -q)
 
 ---
 
-### rm
+### `mocker rm`
 
 Remove one or more containers.
 
-```
+```bash
 mocker rm [OPTIONS] CONTAINER [CONTAINER...]
 ```
 
-**Options:**
-
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--force` | `-f` | Force the removal of a running container |
+**Flags:**
+```
+-f, --force   Force remove a running container
+```
 
 **Examples:**
-
 ```bash
-# Remove a stopped container
 mocker rm myapp
-
-# Force remove a running container
 mocker rm -f myapp
-
-# Remove multiple
-mocker rm container1 container2
-
-# Remove all stopped containers
 mocker rm $(mocker ps -aq)
 ```
 
-**Error cases:**
-- Removing a running container without `-f`: `Error response from daemon: You cannot remove a running container...`
-- Container not found: `Error response from daemon: No such container: <name>`
-
 ---
 
-### exec
+### `mocker exec`
 
 Execute a command in a running container.
 
-```
+```bash
 mocker exec [OPTIONS] CONTAINER COMMAND [ARG...]
 ```
 
-**Options:**
-
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--interactive` | `-i` | Keep STDIN open |
-| `--tty` | `-t` | Allocate a pseudo-TTY |
+**Flags:**
+```
+-i, --interactive   Keep STDIN open
+-t, --tty           Allocate a pseudo-TTY
+```
 
 **Examples:**
-
 ```bash
 mocker exec myapp env
-mocker exec myapp ps aux
 mocker exec -it myapp sh
 ```
 
 ---
 
-### logs
+### `mocker logs`
 
 Fetch the logs of a container.
 
-```
+```bash
 mocker logs [OPTIONS] CONTAINER
 ```
 
-**Options:**
-
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--follow` | `-f` | Follow log output |
-| `--tail` | | Number of lines to show from the end |
-| `--timestamps` | `-t` | Show timestamps |
+**Flags:**
+```
+-f, --follow       Follow log output
+    --tail         Number of lines to show from the end
+-t, --timestamps   Show timestamps
+```
 
 **Examples:**
-
 ```bash
 mocker logs myapp
 mocker logs -f myapp
@@ -261,83 +173,42 @@ mocker logs --tail 100 myapp
 
 ---
 
-### inspect
+### `mocker inspect`
 
 Return low-level information on containers or images.
 
-```
+```bash
 mocker inspect TARGET [TARGET...]
 ```
 
-Returns a JSON array. Automatically detects whether the target is a container or image.
+Always returns a JSON array, even for a single target.
 
 **Examples:**
-
 ```bash
-# Inspect a container
 mocker inspect myapp
-
-# Inspect an image
 mocker inspect alpine:latest
-
-# Inspect multiple targets
-mocker inspect myapp postgres:15
-
-# Pretty-print with jq
 mocker inspect myapp | jq '.[0].state'
-```
-
-**Output format:**
-
-```json
-[
-  {
-    "id": "b8482c2a83c8...",
-    "name": "myapp",
-    "image": "nginx:latest",
-    "state": "running",
-    "status": "Up 2 minutes",
-    "created": "2026-03-07T14:00:00Z",
-    "ports": [
-      { "hostPort": 8080, "containerPort": 80, "portProtocol": "tcp" }
-    ],
-    "labels": {}
-  }
-]
 ```
 
 ---
 
-### stats
+### `mocker stats`
 
-Display a live stream of container resource usage statistics.
+Display resource usage statistics for containers.
 
-```
+```bash
 mocker stats [OPTIONS] [CONTAINER...]
 ```
 
-**Options:**
-
-| Flag | Description |
-|------|-------------|
-| `--no-stream` | Disable streaming stats and only pull the first result |
-
-**Output columns:**
-
+**Flags:**
 ```
-CONTAINER ID   NAME   CPU %   MEM USAGE / LIMIT   MEM %   NET I/O   BLOCK I/O   PIDS
+--no-stream   Only pull the first result (no live stream)
 ```
 
 **Examples:**
-
 ```bash
-# All containers (streaming)
 mocker stats
-
-# One-shot snapshot
 mocker stats --no-stream
-
-# Specific containers
 mocker stats myapp mydb
 ```
 
@@ -345,46 +216,32 @@ mocker stats myapp mydb
 
 ## Image Commands
 
-### pull
+### `mocker pull`
 
 Download an image from a registry.
 
-```
+```bash
 mocker pull IMAGE[:TAG]
 ```
 
-Idempotent — re-pulling an existing image shows "Image is up to date" without creating duplicates.
-
 **Examples:**
-
 ```bash
-mocker pull alpine               # Uses :latest tag
+mocker pull alpine
 mocker pull nginx:1.25
 mocker pull registry.example.com/myapp:v2.0
 ```
 
-**Output:**
-
-```
-1.25: Pulling from nginx
-a1b2c3d4e5f6: Pull complete
-Digest: sha256:...
-Status: Downloaded newer image for nginx:1.25
-nginx:1.25
-```
-
 ---
 
-### push
+### `mocker push`
 
 Upload an image to a registry.
 
-```
+```bash
 mocker push IMAGE[:TAG]
 ```
 
 **Examples:**
-
 ```bash
 mocker push my-registry.io/myapp:latest
 mocker push my-registry.io/myapp:v2.0
@@ -392,78 +249,60 @@ mocker push my-registry.io/myapp:v2.0
 
 ---
 
-### images
+### `mocker images`
 
 List local images.
 
-```
+```bash
 mocker images [OPTIONS]
 ```
 
-**Options:**
-
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--quiet` | `-q` | Only show image IDs |
-
-**Output columns:**
-
+**Flags:**
 ```
-REPOSITORY   TAG   IMAGE ID   CREATED   SIZE
+-q, --quiet   Only show image IDs
 ```
 
 **Examples:**
-
 ```bash
 mocker images
 mocker images -q
-
-# Remove all images (use with caution)
 mocker rmi $(mocker images -q)
 ```
 
 ---
 
-### build
+### `mocker build`
 
 Build an image from a Dockerfile.
 
-```
+```bash
 mocker build [OPTIONS] PATH
 ```
 
-**Options:**
-
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--tag` | `-t` | Name and optionally a tag (`name:tag`) |
-| `--file` | `-f` | Name of the Dockerfile (default: `Dockerfile`) |
+**Flags:**
+```
+-t, --tag    Name and tag (name:tag)
+-f, --file   Dockerfile path (default: Dockerfile in build context)
+```
 
 **Examples:**
-
 ```bash
-# Build in current directory
 mocker build -t myapp:latest .
-
-# Specify Dockerfile path
 mocker build -t myapp:latest -f ./docker/Dockerfile.prod .
-
-# Build with version tag
 mocker build -t my-registry.io/myapp:$(git rev-parse --short HEAD) .
 ```
 
 ---
 
-### tag
+### `mocker tag`
 
-Create a tag that refers to a source image.
+Create a tag pointing to a source image.
 
-```
+```bash
 mocker tag SOURCE_IMAGE TARGET_IMAGE
 ```
 
 **Examples:**
-
 ```bash
 mocker tag nginx:latest my-registry.io/nginx:prod
 mocker tag alpine:latest my-registry.io/base:latest
@@ -471,78 +310,64 @@ mocker tag alpine:latest my-registry.io/base:latest
 
 ---
 
-### rmi
+### `mocker rmi`
 
 Remove one or more images.
 
-```
+```bash
 mocker rmi IMAGE [IMAGE...]
 ```
 
 **Examples:**
-
 ```bash
 mocker rmi alpine:latest
 mocker rmi nginx:1.24 nginx:1.25
-
-# Output
-# Untagged: alpine:latest
-# Deleted: sha256:d67dd0f7...
 ```
 
 ---
 
 ## Network Commands
 
-### network create
+### `mocker network create`
 
 Create a network.
 
-```
+```bash
 mocker network create [OPTIONS] NETWORK
 ```
 
-**Options:**
-
-| Flag | Description |
-|------|-------------|
-| `--driver` | Driver to manage the network (default: `bridge`) |
+**Flags:**
+```
+--driver   Driver to manage the network (default: bridge)
+```
 
 **Examples:**
-
 ```bash
 mocker network create mynet
 mocker network create --driver bridge backend
 ```
 
-Returns the network ID on success.
-
 ---
 
-### network ls
+### `mocker network ls`
 
 List networks.
 
-```
+```bash
 mocker network ls
-```
-
-**Output columns:**
-
-```
-NETWORK ID   NAME   DRIVER   SCOPE
 ```
 
 ---
 
-### network rm
+### `mocker network rm`
 
 Remove one or more networks.
 
-```
+```bash
 mocker network rm NETWORK [NETWORK...]
 ```
 
+**Examples:**
 ```bash
 mocker network rm mynet
 mocker network rm net1 net2
@@ -550,69 +375,47 @@ mocker network rm net1 net2
 
 ---
 
-### network inspect
+### `mocker network inspect`
 
 Display detailed information on a network.
 
-```
+```bash
 mocker network inspect NETWORK
 ```
 
-**Output format:**
-
-```json
-{
-  "id": "a69bb9f3bb64...",
-  "name": "mynet",
-  "driver": "bridge",
-  "created": "2026-03-07T14:00:00Z",
-  "containers": ["myapp", "mydb"],
-  "labels": {}
-}
-```
-
 ---
 
-### network connect
+### `mocker network connect`
 
 Connect a container to a network.
 
-```
-mocker network connect NETWORK CONTAINER
-```
-
 ```bash
-mocker network connect mynet myapp
+mocker network connect NETWORK CONTAINER
 ```
 
 ---
 
-### network disconnect
+### `mocker network disconnect`
 
 Disconnect a container from a network.
 
-```
-mocker network disconnect NETWORK CONTAINER
-```
-
 ```bash
-mocker network disconnect mynet myapp
+mocker network disconnect NETWORK CONTAINER
 ```
 
 ---
 
 ## Volume Commands
 
-### volume create
+### `mocker volume create`
 
-Create a volume.
+Create a volume. Data is stored at `~/.mocker/volumes/<name>/_data`.
 
-```
+```bash
 mocker volume create [VOLUME]
 ```
 
-Creates the volume directory at `~/.mocker/volumes/<name>/_data`.
-
+**Examples:**
 ```bash
 mocker volume create pgdata
 mocker volume create app-uploads
@@ -620,30 +423,25 @@ mocker volume create app-uploads
 
 ---
 
-### volume ls
+### `mocker volume ls`
 
 List volumes.
 
-```
+```bash
 mocker volume ls
-```
-
-**Output columns:**
-
-```
-DRIVER   VOLUME NAME
 ```
 
 ---
 
-### volume rm
+### `mocker volume rm`
 
 Remove one or more volumes.
 
-```
+```bash
 mocker volume rm VOLUME [VOLUME...]
 ```
 
+**Examples:**
 ```bash
 mocker volume rm pgdata
 mocker volume rm vol1 vol2
@@ -651,69 +449,59 @@ mocker volume rm vol1 vol2
 
 ---
 
-### volume inspect
+### `mocker volume inspect`
 
 Display detailed information about a volume.
 
-```
+```bash
 mocker volume inspect VOLUME
-```
-
-**Output format:**
-
-```json
-{
-  "name": "pgdata",
-  "driver": "local",
-  "mountpoint": "/Users/you/.mocker/volumes/pgdata/_data",
-  "created": "2026-03-07T14:00:00Z",
-  "labels": {}
-}
 ```
 
 ---
 
 ## Compose Commands
 
-All compose subcommands accept these shared options:
+All compose subcommands share these options:
 
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--file` | `-f` | Compose file path (default: `docker-compose.yml`) |
-| `--project-name` | `-p` | Project name (default: directory name) |
+```
+-f, --file           Compose file path (default: docker-compose.yml)
+-p, --project-name   Project name (default: directory name)
+```
 
-### compose up
+### `mocker compose up`
 
 Create and start containers defined in a Compose file.
 
+```bash
+mocker compose [OPTIONS] up [--detach] [SERVICE...]
 ```
-mocker compose [OPTIONS] up [--detach]
+
+**Flags:**
+```
+-d, --detach   Run containers in the background
 ```
 
-**Options:**
-
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--detach` | `-d` | Run containers in the background |
-
+**Examples:**
 ```bash
 mocker compose up -d
+mocker compose up -d postgres api
 mocker compose -f staging.yml up -d
 mocker compose -p myproject up -d
 ```
 
-Services start in dependency order (respects `depends_on`). Named networks and volumes are created automatically.
+Services start in dependency order (`depends_on`). Networks and volumes are created automatically.
 
 ---
 
-### compose down
+### `mocker compose down`
 
 Stop and remove containers and networks.
 
-```
+```bash
 mocker compose [OPTIONS] down
 ```
 
+**Examples:**
 ```bash
 mocker compose down
 mocker compose -f staging.yml down
@@ -721,115 +509,96 @@ mocker compose -f staging.yml down
 
 ---
 
-### compose ps
+### `mocker compose ps`
 
 List containers for the Compose project.
 
-```
+```bash
 mocker compose [OPTIONS] ps
-```
-
-**Output columns:**
-
-```
-NAME   IMAGE   COMMAND   SERVICE   CREATED   STATUS   PORTS
 ```
 
 ---
 
-### compose logs
+### `mocker compose logs`
 
 View output from containers.
 
-```
+```bash
 mocker compose [OPTIONS] logs [--follow] [SERVICE]
 ```
 
-**Options:**
+**Flags:**
+```
+--follow   Follow log output
+```
 
-| Flag | Description |
-|------|-------------|
-| `--follow` | Follow log output (no `-f` shorthand to avoid conflict with `--file`) |
-
+**Examples:**
 ```bash
-# All services
 mocker compose logs
-
-# Specific service
 mocker compose logs api
-
-# Follow a specific service
 mocker compose logs --follow api
 ```
 
 ---
 
-### compose restart
+### `mocker compose restart`
 
 Restart service containers.
 
-```
+```bash
 mocker compose [OPTIONS] restart [SERVICE]
 ```
 
+**Examples:**
 ```bash
-# Restart all services
 mocker compose restart
-
-# Restart a specific service
 mocker compose restart api
+```
+
+---
+
+### `mocker compose kill`
+
+Force stop service containers.
+
+```bash
+mocker compose [OPTIONS] kill [SERVICE]
+```
+
+**Examples:**
+```bash
+mocker compose kill
+mocker compose kill api
 ```
 
 ---
 
 ## System Commands
 
-### system info
+### `mocker system info`
 
 Display system-wide information.
 
-```
+```bash
 mocker system info
-```
-
-**Output:**
-
-```
-Client:
- Version:    0.1.0
- Context:    default
-
-Server:
- Containers: 3
-  Running:   2
-  Paused:    0
-  Stopped:   1
- Images:     5
- Server Version: 0.1.0
- Storage Driver: json-file
- Operating System: macOS Version 26.0
- Architecture: arm64
- CPUs: 12
- Total Memory: 24.00GiB
- Docker Root Dir: /Users/you/.mocker
 ```
 
 ---
 
-### system prune
+### `mocker system prune`
 
-Remove unused containers and resources.
+Remove stopped containers and unused resources.
 
-```
+```bash
 mocker system prune [OPTIONS]
 ```
 
-**Options:**
+**Flags:**
+```
+-f, --force   Do not prompt for confirmation
+```
 
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--force` | `-f` | Do not prompt for confirmation |
-
+**Examples:**
 ```bash
 mocker system prune -f
 ```
