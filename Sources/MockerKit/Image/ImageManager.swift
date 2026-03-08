@@ -112,17 +112,14 @@ public actor ImageManager {
 
     /// Build an image from a Dockerfile using the `container` CLI.
     public func build(tag: String, context: String, dockerfile: String = "Dockerfile", noCache: Bool = false, buildArgs: [String] = []) async throws -> ImageInfo {
-        let contextURL = URL(fileURLWithPath: context)
+        let contextURL = URL(fileURLWithPath: context).standardized
         let dockerfilePath = contextURL.appendingPathComponent(dockerfile).path
 
         guard FileManager.default.fileExists(atPath: dockerfilePath) else {
             throw MockerError.buildError("Dockerfile not found at \(dockerfilePath)")
         }
 
-        var args = ["build", "-t", tag]
-        if dockerfile != "Dockerfile" {
-            args += ["-f", dockerfilePath]
-        }
+        var args = ["build", "-t", tag, "-f", dockerfilePath]
         if noCache { args.append("--no-cache") }
         for arg in buildArgs { args += ["--build-arg", arg] }
         args.append(context)
