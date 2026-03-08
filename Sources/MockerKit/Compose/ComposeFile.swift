@@ -24,8 +24,64 @@ public struct ComposeFile: Sendable {
             throw MockerError.composeFileNotFound(path)
         }
 
-        let content = try String(contentsOf: url, encoding: .utf8)
+        var content = try String(contentsOf: url, encoding: .utf8)
+
+        // Load .env file from same directory for variable substitution
+        let envFile = url.deletingLastPathComponent().appendingPathComponent(".env").path
+        let dotEnv = loadDotEnv(from: envFile)
+
+        // Substitute ${VAR:-default} and $VAR patterns before YAML parsing
+        content = substituteVariables(in: content, dotEnv: dotEnv)
+
         return try parse(content)
+    }
+
+    /// Load key=value pairs from a .env file.
+    private static func loadDotEnv(from path: String) -> [String: String] {
+        guard let content = try? String(contentsOfFile: path, encoding: .utf8) else { return [:] }
+        var env: [String: String] = [:]
+        for line in content.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
+            let parts = trimmed.split(separator: "=", maxSplits: 1)
+            guard parts.count == 2 else { continue }
+            let key = String(parts[0]).trimmingCharacters(in: .whitespaces)
+            var value = String(parts[1]).trimmingCharacters(in: .whitespaces)
+            // Strip surrounding quotes
+            if (value.hasPrefix("\"") && value.hasSuffix("\"")) ||
+               (value.hasPrefix("'") && value.hasSuffix("'")) {
+                value = String(value.dropFirst().dropLast())
+            }
+            env[key] = value
+        }
+        return env
+    }
+
+    /// Substitute ${VAR}, ${VAR:-default}, and $VAR patterns using env + dotEnv.
+    private static func substituteVariables(in yaml: String, dotEnv: [String: String]) -> String {
+        let processEnv = ProcessInfo.processInfo.environment
+        // dotEnv takes lower priority than actual environment
+        let env = dotEnv.merging(processEnv) { _, new in new }
+
+        var result = yaml
+        // Match ${VAR:-default}, ${VAR-default}, ${VAR}
+        let pattern = #"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::?-([^}]*))?\}"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return result }
+
+        // Process from end to start to preserve offsets
+        let ns = result as NSString
+        let matches = regex.matches(in: result, range: NSRange(result.startIndex..., in: result))
+        for match in matches.reversed() {
+            guard let range = Range(match.range, in: result) else { continue }
+            let varName = match.numberOfRanges > 1 && match.range(at: 1).location != NSNotFound
+                ? ns.substring(with: match.range(at: 1)) : ""
+            let defaultVal = match.numberOfRanges > 2 && match.range(at: 2).location != NSNotFound
+                ? ns.substring(with: match.range(at: 2)) : nil
+
+            let resolved = env[varName] ?? defaultVal ?? ""
+            result.replaceSubrange(range, with: resolved)
+        }
+        return result
     }
 
     /// Parse a docker-compose.yml string.

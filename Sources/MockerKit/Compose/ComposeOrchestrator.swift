@@ -180,11 +180,18 @@ public actor ComposeOrchestrator {
             _ = try await imageManager.pull(image)
         } else if let build = service.build {
             let tag = "\(projectName)-\(service.name):latest"
-            _ = try await imageManager.build(
-                tag: tag,
-                context: build.context,
-                dockerfile: build.dockerfile ?? "Dockerfile"
-            )
+            // Only build if image doesn't already exist (like `docker compose up` without --build)
+            let existingImages = try await imageManager.list()
+            let imageExists = existingImages.contains { img in
+                img.tag == "latest" && img.repository.hasSuffix("\(projectName)-\(service.name)")
+            }
+            if !imageExists {
+                _ = try await imageManager.build(
+                    tag: tag,
+                    context: build.context,
+                    dockerfile: build.dockerfile ?? "Dockerfile"
+                )
+            }
         }
 
         let imageName = service.image ?? "\(projectName)-\(service.name):latest"
@@ -192,23 +199,18 @@ public actor ComposeOrchestrator {
         // Parse port mappings
         let ports = try service.ports.map { try PortMapping.parse($0) }
 
-        // Parse volumes — resolve named volumes to their host mountpoint paths
-        let knownVolumes = await volumeManager.list()
+        // Parse volumes — bind-mount absolute/relative host paths only.
+        // Named volumes (no leading '/') are skipped: Apple's virtiofs mounts don't
+        // support chown from within containers, which breaks images like postgres that
+        // chown their data directory on init. Containers use internal VM storage instead.
         var volumes: [VolumeMount] = []
         for volSpec in service.volumes {
-            var mount = try VolumeMount.parse(volSpec)
-            // If source is not an absolute path, it's a named volume
-            if !mount.source.isEmpty && !mount.source.hasPrefix("/") {
-                let fullName = "\(projectName)-\(mount.source)"
-                if let vol = knownVolumes.first(where: { $0.name == fullName }) {
-                    mount.source = vol.mountpoint
-                } else {
-                    // Volume not pre-created — create it now
-                    let vol = try await volumeManager.create(name: fullName)
-                    mount.source = vol.mountpoint
-                }
+            let mount = try VolumeMount.parse(volSpec)
+            // Only bind-mount absolute host paths; skip named volumes
+            if mount.source.isEmpty || mount.source.hasPrefix("/") {
+                volumes.append(mount)
             }
-            volumes.append(mount)
+            // Named volumes are intentionally skipped — container uses internal storage
         }
 
         let config = ContainerConfig(
