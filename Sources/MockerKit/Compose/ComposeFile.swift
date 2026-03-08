@@ -17,6 +17,20 @@ public struct ComposeFile: Sendable {
         self.volumes = volumes
     }
 
+    /// Default compose file names searched in order, matching Docker Compose V2 behaviour.
+    public static let defaultFileNames = ["compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"]
+
+    /// Return the path of the first default compose file found in `directory`.
+    public static func findDefault(in directory: String = FileManager.default.currentDirectoryPath) -> String? {
+        for name in defaultFileNames {
+            let path = URL(fileURLWithPath: directory).appendingPathComponent(name).path
+            if FileManager.default.fileExists(atPath: path) {
+                return path
+            }
+        }
+        return nil
+    }
+
     /// Parse a docker-compose.yml file from a path.
     public static func load(from path: String) throws -> ComposeFile {
         let url = URL(fileURLWithPath: path)
