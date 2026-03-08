@@ -21,13 +21,16 @@ struct ComposeCommand: AsyncParsableCommand {
 
 struct ComposeOptions: ParsableArguments {
     @Option(name: [.customShort("f"), .long], help: "Compose file path")
-    var file: String = "docker-compose.yml"
+    var file: String?
 
     @Option(name: [.customShort("p"), .customLong("project-name")], help: "Project name")
     var projectName: String?
 
     func loadCompose() throws -> (ComposeFile, String) {
-        let path = file
+        guard let path = file ?? ComposeFile.findDefault() else {
+            let searched = ComposeFile.defaultFileNames.joined(separator: ", ")
+            throw MockerError.composeFileNotFound("No compose file found. Searched for: \(searched)")
+        }
         let composeFile = try ComposeFile.load(from: path)
 
         // Derive project name from directory if not specified
