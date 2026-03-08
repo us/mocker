@@ -138,13 +138,18 @@ public actor ContainerEngine {
     public func remove(_ identifier: String, force: Bool = false) async throws -> ContainerInfo {
         let container = try await resolve(identifier)
 
-        if container.state == .running && !force {
+        // Check live state — store may be stale (e.g. container exited on its own)
+        let (lsOut, _) = (try? await runCLI(["ls"])) ?? ("", 0)
+        let liveIDs = parseLSOutput(lsOut)
+        let isLiveRunning = liveIDs.contains(container.name) || liveIDs.contains(container.id)
+
+        if isLiveRunning && !force {
             throw MockerError.operationFailed(
                 "You cannot remove a running container \(container.id). Stop the container before attempting removal or use -f"
             )
         }
 
-        if container.state == .running {
+        if isLiveRunning {
             _ = try? await runCLI(["stop", container.name])
         }
 

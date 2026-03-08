@@ -48,6 +48,9 @@ struct Run: AsyncParsableCommand {
     @Option(name: .long, help: "Restart policy (no, always, on-failure, unless-stopped)")
     var restart: String = "no"
 
+    @Flag(name: .long, help: "Automatically remove the container when it exits")
+    var rm = false
+
     func run() async throws {
         let config = MockerConfig()
         try config.ensureDirectories()
@@ -102,6 +105,9 @@ struct Run: AsyncParsableCommand {
             let lines = try await engine.logs(container.id)
             for line in lines {
                 print(line)
+            }
+            if rm {
+                _ = try? await engine.remove(container.id, force: true)
             }
         }
     }
