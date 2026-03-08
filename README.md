@@ -15,7 +15,7 @@
 
 ---
 
-Mocker is a **Docker-compatible CLI + Compose + MenuBar GUI** tool that runs natively on macOS using Apple's [Containerization](https://developer.apple.com/documentation/containerization) framework (macOS 26+). It speaks the same language as Docker — same commands, same flags, same output format — so your existing scripts and muscle memory just work.
+Mocker is a **Docker-compatible CLI + Compose** tool that runs natively on macOS using Apple's [Containerization](https://developer.apple.com/documentation/containerization) framework (macOS 26+). It speaks the same language as Docker — same commands, same flags, same output format — so your existing scripts and muscle memory just work.
 
 ## Just replace `docker` with `mocker`
 
@@ -41,7 +41,7 @@ Your existing `docker-compose.yml` works as-is.
 - **Network management** — `network create/ls/rm/inspect/connect/disconnect`
 - **Volume management** — `volume create/ls/rm/inspect`
 - **Docker Compose v2** — `compose up/down/ps/logs/restart` with dependency ordering
-- **MenuBar GUI** — Native SwiftUI app for at-a-glance container management
+- **MenuBar GUI** — Native SwiftUI app *(coming soon)*
 - **JSON state persistence** — All metadata stored in `~/.mocker/`
 - **Swift 6 concurrency** — Full actor-based thread safety throughout
 
@@ -354,14 +354,14 @@ approach gives you a fully working Docker-compatible tool on macOS 26 today:
 - [x] Full Docker CLI command set
 - [x] Docker Compose v2 support
 - [x] Network & Volume management
-- [x] MenuBar GUI skeleton
+- [ ] MenuBar GUI
 - [x] Real container execution on macOS 26 (via Apple `container` CLI)
 - [x] `mocker build` — delegates to `container build` with live output
 - [x] `mocker stats` — real CPU% and memory from VM process
 - [x] Port mapping (`-p`) — userspace TCP proxy subprocess
 - [ ] Registry authentication (`mocker login`)
 - [ ] `mocker compose --scale`
-- [ ] MenuBar live container metrics
+- [ ] MenuBar live container metrics (CPU, memory, logs)
 - [ ] Image layer size reporting
 - [ ] Direct Containerization framework integration (pending vminit compatibility)
 
@@ -385,7 +385,7 @@ git commit -m "feat: add my feature"
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+AGPL-3.0 — see [LICENSE](LICENSE) for details.
 
 ---
 
