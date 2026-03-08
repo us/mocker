@@ -1,21 +1,18 @@
-# Contributing to Mocker
+---
+title: Contributing
+---
+
+# Contributing
 
 Thank you for your interest in contributing! This guide covers everything you need to get started.
 
-## Table of Contents
-
-- [Code of Conduct](#code-of-conduct)
-- [Development Setup](#development-setup)
-- [Project Structure](#project-structure)
-- [Making Changes](#making-changes)
-- [Coding Standards](#coding-standards)
-- [Testing](#testing)
-- [Submitting a Pull Request](#submitting-a-pull-request)
-- [Implementing Apple Containerization TODOs](#implementing-apple-containerization-todos)
+---
 
 ## Code of Conduct
 
 Be respectful and constructive. We follow the [Contributor Covenant](https://www.contributor-covenant.org/).
+
+---
 
 ## Development Setup
 
@@ -25,10 +22,10 @@ Be respectful and constructive. We follow the [Contributor Covenant](https://www
 - Swift 6.0+
 - Xcode 16+
 
-### Clone and Build
+### Clone and build
 
 ```bash
-git clone https://github.com/yourname/mocker.git
+git clone https://github.com/us/mocker.git
 cd mocker
 
 # Build in debug mode
@@ -41,7 +38,7 @@ swift test
 swift run mocker --help
 ```
 
-### Recommended Editor Setup
+### Recommended editor setup
 
 **VS Code** with the Swift extension:
 ```bash
@@ -54,7 +51,7 @@ code .
 open Package.swift
 ```
 
-### Clean State for Testing
+### Clean state for testing
 
 ```bash
 # Remove all Mocker state (containers, images, networks, volumes)
@@ -63,6 +60,8 @@ rm -rf ~/.mocker
 # Rebuild and test
 swift build && swift run mocker system info
 ```
+
+---
 
 ## Project Structure
 
@@ -76,9 +75,11 @@ Tests/               # Unit and integration tests
 docs/                # Documentation
 ```
 
+---
+
 ## Making Changes
 
-### 1. Fork and Branch
+### 1. Fork and branch
 
 ```bash
 git checkout -b feat/my-feature
@@ -86,14 +87,14 @@ git checkout -b feat/my-feature
 git checkout -b fix/bug-description
 ```
 
-### 2. Make Your Changes
+### 2. Make your changes
 
 Follow the patterns in existing code:
 - New commands: add a file in `Sources/Mocker/Commands/`
 - New engine methods: add to the relevant actor in `MockerKit`
 - New models: add to `Sources/MockerKit/Models/`
 
-### 3. Write Tests
+### 3. Write tests
 
 Add tests for any new functionality in `Tests/MockerKitTests/`:
 
@@ -112,9 +113,11 @@ swift test
 swift run mocker --help  # smoke test
 ```
 
+---
+
 ## Coding Standards
 
-### Swift Style
+### Swift style
 
 - Use Swift 6 strict concurrency — all actors must be properly `await`ed
 - Prefer `actor` for any stateful component
@@ -122,7 +125,7 @@ swift run mocker --help  # smoke test
 - Prefer `struct` over `class` for value types
 - Use `guard` for early returns
 
-### Docker Compatibility
+### Docker compatibility
 
 When implementing or modifying commands, check against Docker's output:
 
@@ -148,7 +151,7 @@ Key compatibility rules:
 - Swift types: PascalCase for types, camelCase for properties/methods
 - CLI flags: kebab-case matching Docker (`--no-stream`, `--project-name`)
 
-### Commit Messages
+### Commit messages
 
 Use [Conventional Commits](https://www.conventionalcommits.org/):
 
@@ -163,9 +166,11 @@ chore: update Yams dependency to 5.2
 
 Maximum 72 characters for the subject line.
 
+---
+
 ## Testing
 
-### Running Tests
+### Running tests
 
 ```bash
 # All tests
@@ -179,7 +184,7 @@ swift test --filter MockerTests
 swift test --filter "ContainerConfigTests/testParsePortMapping"
 ```
 
-### Test Structure
+### Test structure
 
 ```
 Tests/
@@ -191,7 +196,7 @@ Tests/
     └── CLITests.swift               # CLI smoke tests
 ```
 
-### Writing Tests
+### Writing tests
 
 Use the `Testing` framework (Swift 6):
 
@@ -216,7 +221,7 @@ struct MyFeatureTests {
 }
 ```
 
-### Integration Testing
+### Integration testing
 
 For commands that affect state, use a temporary config:
 
@@ -228,6 +233,8 @@ try config.ensureDirectories()
 // ... test with this config
 ```
 
+---
+
 ## Submitting a Pull Request
 
 1. **Ensure tests pass:** `swift test`
@@ -238,12 +245,12 @@ try config.ensureDirectories()
    - How was it tested?
    - Any breaking changes?
 
-### PR Title Format
-
-Follow Conventional Commits format:
+PR title follows Conventional Commits format:
 - `feat: add mocker login command`
 - `fix: prevent duplicate images on repeated pull`
 - `docs: add compose guide`
+
+---
 
 ## Implementing Apple Containerization TODOs
 
@@ -253,7 +260,7 @@ The highest-impact contributions are replacing placeholder implementations with 
 grep -r "TODO:" Sources/MockerKit/
 ```
 
-### Key Integration Points
+### Key integration points
 
 **Image Pull** (`ImageManager.swift`):
 ```swift
@@ -272,12 +279,14 @@ grep -r "TODO:" Sources/MockerKit/
 // TODO: Stream real logs from the container process
 ```
 
-### Guidelines for TODO Implementation
+### Guidelines for TODO implementation
 
 1. Keep the existing method signature — callers should not change
 2. The placeholder `ContainerInfo` returned should match the real framework's data
 3. Add error handling for framework-specific errors, mapping to `MockerError`
 4. Update the relevant tests
+
+---
 
 ## Questions?
 
