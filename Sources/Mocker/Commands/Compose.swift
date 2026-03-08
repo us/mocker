@@ -12,6 +12,7 @@ struct ComposeCommand: AsyncParsableCommand {
             ComposePS.self,
             ComposeLogs.self,
             ComposeRestart.self,
+            ComposeKill.self,
         ]
     )
 }
@@ -123,6 +124,9 @@ struct ComposeDown: AsyncParsableCommand {
     @Flag(name: .shortAndLong, help: "Remove named volumes")
     var volumes = false
 
+    @Option(name: .long, help: "Timeout in seconds for stopping containers")
+    var timeout: Int = 10
+
     func run() async throws {
         let (composeFile, project) = try options.loadCompose()
         let config = MockerConfig()
@@ -232,6 +236,42 @@ struct ComposeLogs: AsyncParsableCommand {
             for line in lines {
                 print(line)
             }
+        }
+    }
+}
+
+struct ComposeKill: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "kill",
+        abstract: "Force stop service containers"
+    )
+
+    @OptionGroup var options: ComposeOptions
+
+    @Argument(help: "Service name (kills all if omitted)")
+    var service: String?
+
+    func run() async throws {
+        let (_, project) = try options.loadCompose()
+        let config = MockerConfig()
+        let engine = try ContainerEngine(config: config)
+        let imageManager = try ImageManager(config: config)
+        let networkManager = try NetworkManager(config: config)
+        let volumeManager = try VolumeManager(config: config)
+
+        let orchestrator = ComposeOrchestrator(
+            projectName: project,
+            engine: engine,
+            imageManager: imageManager,
+            networkManager: networkManager,
+            volumeManager: volumeManager
+        )
+
+        let containers = try await orchestrator.ps()
+        let targets = service.map { s in containers.filter { $0.name.contains(s) } } ?? containers
+        for c in targets {
+            try? await engine.stop(c.id)
+            print(c.name)
         }
     }
 }
