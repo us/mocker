@@ -112,7 +112,14 @@ public actor ImageManager {
 
     /// Build an image from a Dockerfile using the `container` CLI.
     public func build(tag: String, context: String, dockerfile: String = "Dockerfile", noCache: Bool = false, buildArgs: [String] = []) async throws -> ImageInfo {
-        let contextURL = URL(fileURLWithPath: context).standardized
+        let contextURL: URL
+        if context.hasPrefix("/") {
+            contextURL = URL(fileURLWithPath: context)
+        } else {
+            contextURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                .appendingPathComponent(context)
+                .standardized
+        }
         let dockerfilePath = contextURL.appendingPathComponent(dockerfile).path
 
         guard FileManager.default.fileExists(atPath: dockerfilePath) else {
