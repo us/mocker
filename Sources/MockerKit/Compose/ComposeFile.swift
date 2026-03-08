@@ -95,6 +95,23 @@ public struct ComposeFile: Sendable {
         }
         return order
     }
+
+    /// Return a new ComposeFile containing only the requested services
+    /// and their transitive dependencies.
+    public func filtering(services requested: [String]) -> ComposeFile {
+        var included = Set<String>()
+
+        func include(_ name: String) {
+            guard !included.contains(name), let svc = services[name] else { return }
+            included.insert(name)
+            for dep in svc.dependsOn { include(dep) }
+        }
+
+        for name in requested { include(name) }
+
+        let filteredServices = services.filter { included.contains($0.key) }
+        return ComposeFile(services: filteredServices, networks: networks, volumes: volumes)
+    }
 }
 
 /// A service definition in a compose file.
