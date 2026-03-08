@@ -316,6 +316,27 @@ swift test --filter MockerKitTests
 swift run mocker --help
 ```
 
+## 性能
+
+基准测试在 Apple M 系列芯片、macOS 26 上运行（`hyperfine --warmup 5 --runs 15`）：
+
+| 工具 | 容器启动时间 | 对比 Docker |
+|------|:-----------:|:-----------:|
+| Docker Desktop | 320 ms | 基准 |
+| Apple `container` CLI | 1,030 ms | 慢 3.2× |
+| **Mocker** | **1,153 ms** | **慢 3.6×** |
+
+Apple 的 VM-per-container 模型以更强的隔离性换取启动时间——每个容器拥有独立的轻量级 Linux VM。Mocker 在 Apple 运行时基础上仅增加约 120 ms 的管理开销。
+
+**CPU 与内存吞吐量**（容器内运行 sysbench，持续 30 秒）：
+
+| 指标 | Docker | Apple Container |
+|------|:------:|:---------------:|
+| CPU 事件数/秒 | 7,958 | 7,894 |
+| 内存吞吐量 | 13,340 MiB/s | 13,119 MiB/s |
+
+原始计算性能基本相同——VM 边界对 CPU 和内存工作负载的影响可以忽略不计。
+
 ## 工作原理
 
 Mocker 将容器生命周期（run、stop、exec、logs、build）委托给 Apple 的 `container` CLI 处理。

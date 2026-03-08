@@ -334,6 +334,27 @@ swift test --filter MockerKitTests
 swift run mocker --help
 ```
 
+## Performance
+
+Benchmarks run on Apple M-series, macOS 26 (`hyperfine --warmup 5 --runs 15`):
+
+| Tool | Container startup | vs Docker |
+|------|:-----------------:|:---------:|
+| Docker Desktop | 320 ms | baseline |
+| Apple `container` CLI | 1,030 ms | 3.2× slower |
+| **Mocker** | **1,153 ms** | **3.6× slower** |
+
+Apple's VM-per-container model trades startup time for stronger isolation — every container gets its own lightweight Linux VM. Mocker adds only ~120 ms of management overhead on top of Apple's runtime.
+
+**CPU & Memory throughput** (sysbench inside container, 30s run):
+
+| Metric | Docker | Apple Container |
+|--------|:------:|:---------------:|
+| CPU events/s | 7,958 | 7,894 |
+| Memory throughput | 13,340 MiB/s | 13,119 MiB/s |
+
+Raw compute performance is equivalent — the VM boundary has negligible overhead for CPU and memory workloads.
+
 ## How It Works
 
 Mocker delegates to Apple's `container` CLI for container lifecycle (run, stop, exec, logs, build).
