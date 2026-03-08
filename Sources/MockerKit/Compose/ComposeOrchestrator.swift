@@ -191,7 +191,25 @@ public actor ComposeOrchestrator {
 
         // Parse port mappings
         let ports = try service.ports.map { try PortMapping.parse($0) }
-        let volumes = try service.volumes.map { try VolumeMount.parse($0) }
+
+        // Parse volumes — resolve named volumes to their host mountpoint paths
+        let knownVolumes = await volumeManager.list()
+        var volumes: [VolumeMount] = []
+        for volSpec in service.volumes {
+            var mount = try VolumeMount.parse(volSpec)
+            // If source is not an absolute path, it's a named volume
+            if !mount.source.isEmpty && !mount.source.hasPrefix("/") {
+                let fullName = "\(projectName)-\(mount.source)"
+                if let vol = knownVolumes.first(where: { $0.name == fullName }) {
+                    mount.source = vol.mountpoint
+                } else {
+                    // Volume not pre-created — create it now
+                    let vol = try await volumeManager.create(name: fullName)
+                    mount.source = vol.mountpoint
+                }
+            }
+            volumes.append(mount)
+        }
 
         let config = ContainerConfig(
             name: containerName,
