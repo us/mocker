@@ -97,4 +97,5 @@
 | - | - | - | - |
 
 ## ➕ Added Tasks (discovered during execution)
-(none yet)
+- [x] **Task 4.1**: Implement `--env-file` support in `mocker run`
+  - Details: Parse `.env` files, ignore comments/empty lines, and ensure `-e` overrides take precedence.
