@@ -1,5 +1,6 @@
 import ArgumentParser
 import MockerKit
+import Foundation
 
 struct Run: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
@@ -26,6 +27,9 @@ struct Run: AsyncParsableCommand {
 
     @Option(name: .shortAndLong, parsing: .singleValue, help: "Set environment variables (KEY=VALUE)")
     var env: [String] = []
+
+    @Option(name: .long, help: "Read in a file of environment variables")
+    var envFile: String?
 
     @Option(name: .shortAndLong, parsing: .singleValue, help: "Publish container port (hostPort:containerPort)")
     var publish: [String] = []
@@ -56,14 +60,27 @@ struct Run: AsyncParsableCommand {
         try config.ensureDirectories()
         let engine = try ContainerEngine(config: config)
 
-        let environment = Dictionary(
-            env.compactMap { item -> (String, String)? in
-                let parts = item.split(separator: "=", maxSplits: 1)
-                guard parts.count == 2 else { return nil }
-                return (String(parts[0]), String(parts[1]))
-            },
-            uniquingKeysWith: { _, last in last }
-        )
+        var environment: [String: String] = [:]
+
+        // 1. Read from --env-file if provided
+        if let envFilePath = envFile {
+            let fileURL = URL(fileURLWithPath: envFilePath)
+            let content = try String(contentsOf: fileURL, encoding: .utf8)
+            for line in content.components(separatedBy: .newlines) {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+                let parts = trimmed.split(separator: "=", maxSplits: 1)
+                guard parts.count == 2 else { continue }
+                environment[String(parts[0])] = String(parts[1])
+            }
+        }
+
+        // 2. Add from -e/--env (overrides --env-file)
+        for item in env {
+            let parts = item.split(separator: "=", maxSplits: 1)
+            guard parts.count == 2 else { continue }
+            environment[String(parts[0])] = String(parts[1])
+        }
 
         let ports = try publish.map { try PortMapping.parse($0) }
         let volumes = try volume.map { try VolumeMount.parse($0) }

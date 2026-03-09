@@ -103,6 +103,7 @@ mocker run -d \
   --name myapp \
   -p 8080:80 \
   -e APP_ENV=production \
+  --env-file .env \
   -v /host/data:/app/data \
   myimage:latest
 

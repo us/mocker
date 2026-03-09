@@ -45,6 +45,7 @@ let package = Package(
         .testTarget(
             name: "MockerTests",
             dependencies: [
+                "Mocker",
                 "MockerKit",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ]
