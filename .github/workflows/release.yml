@@ -82,8 +82,8 @@ jobs:
           end
           EOF
 
-          git config user.email "22618852+us@users.noreply.github.com"
-          git config user.name "Recep S"
+          git config user.email "rahmetsaritekin@gmail.com"
+          git config user.name "us"
           git add Formula/mocker.rb
           git commit -m "chore: update mocker to ${VERSION}"
           git push
