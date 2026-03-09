@@ -8,7 +8,7 @@ on:
 jobs:
   build:
     name: Build macOS binary
-    runs-on: macos-15
+    runs-on: macos-26
     permissions:
       contents: write
 
@@ -82,8 +82,8 @@ jobs:
           end
           EOF
 
-          git config user.email "actions@github.com"
-          git config user.name "GitHub Actions"
+          git config user.email "22618852+us@users.noreply.github.com"
+          git config user.name "Recep S"
           git add Formula/mocker.rb
           git commit -m "chore: update mocker to ${VERSION}"
           git push
