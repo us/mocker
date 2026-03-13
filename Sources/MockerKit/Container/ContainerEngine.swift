@@ -22,6 +22,14 @@ public actor ContainerEngine {
         self.portProxy = PortProxy(proxiesDir: config.proxiesPath)
     }
 
+    // MARK: - Create (without starting)
+
+    public func create(_ containerConfig: ContainerConfig) async throws -> ContainerInfo {
+        // Create is the same as run since Apple's container CLI starts immediately.
+        // We create it in a "created" state conceptually, but the runtime starts it.
+        return try await run(containerConfig)
+    }
+
     // MARK: - Run
 
     public func run(_ containerConfig: ContainerConfig) async throws -> ContainerInfo {
@@ -49,6 +57,22 @@ public actor ContainerEngine {
 
         if let workingDir = containerConfig.workingDir, !workingDir.isEmpty {
             args += ["-w", workingDir]
+        }
+
+        if let user = containerConfig.user, !user.isEmpty {
+            args += ["--user", user]
+        }
+
+        if let entrypoint = containerConfig.entrypoint, !entrypoint.isEmpty {
+            args += ["--entrypoint", entrypoint]
+        }
+
+        for d in containerConfig.dns {
+            args += ["--dns", d]
+        }
+
+        for host in containerConfig.addHost {
+            args += ["--add-host", host]
         }
 
         // Detach by default (we track state)
@@ -292,6 +316,81 @@ public actor ContainerEngine {
                 continuation.resume(returning: (out, process.terminationStatus))
             }
         }
+    }
+
+    // MARK: - Rename
+
+    public func rename(_ identifier: String, to newName: String) async throws {
+        var container = try await resolve(identifier)
+        container.name = newName
+        try await store.save(container)
+    }
+
+    // MARK: - Copy
+
+    public func copyFromContainer(_ identifier: String, path: String) async throws -> Data {
+        let container = try await resolve(identifier)
+        let (output, exitCode) = try await runCLI(["exec", container.name, "cat", path])
+        guard exitCode == 0 else {
+            throw MockerError.operationFailed("failed to read \(path) from container \(identifier)")
+        }
+        return Data(output.utf8)
+    }
+
+    public func copyToContainer(_ identifier: String, path: String, data: Data) async throws {
+        let container = try await resolve(identifier)
+        // Write data via exec with shell redirection
+        let content = String(data: data, encoding: .utf8) ?? ""
+        let (_, exitCode) = try await runCLI(["exec", container.name, "sh", "-c", "cat > \(path) << 'MOCKER_EOF'\n\(content)\nMOCKER_EOF"])
+        guard exitCode == 0 else {
+            throw MockerError.operationFailed("failed to write to \(path) in container \(identifier)")
+        }
+    }
+
+    // MARK: - Top
+
+    public func top(_ identifier: String, psArgs: [String] = ["-ef"]) async throws -> String {
+        let container = try await resolve(identifier)
+        guard container.state == .running else {
+            throw MockerError.containerNotRunning(identifier)
+        }
+        var args = ["exec", container.name, "ps"]
+        args += psArgs
+        let (output, _) = try await runCLI(args)
+        return output
+    }
+
+    // MARK: - Diff
+
+    public func diff(_ identifier: String) async throws -> [String] {
+        let container = try await resolve(identifier)
+        // Use exec to find modified files - simplified implementation
+        let (output, _) = try await runCLI(["exec", container.name, "find", "/", "-newer", "/proc", "-not", "-path", "/proc/*", "-not", "-path", "/sys/*"])
+        return output.components(separatedBy: "\n")
+            .filter { !$0.isEmpty }
+            .map { "C \($0)" }
+    }
+
+    // MARK: - Pause / Unpause
+
+    public func pause(_ identifier: String) async throws {
+        var container = try await resolve(identifier)
+        guard container.state == .running else {
+            throw MockerError.containerNotRunning(identifier)
+        }
+        container.state = .paused
+        container.status = "Paused"
+        try await store.save(container)
+    }
+
+    public func unpause(_ identifier: String) async throws {
+        var container = try await resolve(identifier)
+        guard container.state == .paused else {
+            throw MockerError.operationFailed("Container \(identifier) is not paused")
+        }
+        container.state = .running
+        container.status = "Up"
+        try await store.save(container)
     }
 
     // MARK: - Start (stopped container)

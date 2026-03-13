@@ -2,12 +2,12 @@ import ArgumentParser
 import MockerKit
 import Foundation
 
-struct Run: AsyncParsableCommand {
+struct Create: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Create and run a new container"
+        abstract: "Create a new container"
     )
 
-    @Argument(help: "Image to run")
+    @Argument(help: "Image to use")
     var image: String
 
     @Argument(help: "Command to execute in the container")
@@ -15,15 +15,6 @@ struct Run: AsyncParsableCommand {
 
     @Option(name: .long, help: "Assign a name to the container")
     var name: String?
-
-    @Flag(name: .shortAndLong, help: "Run container in background")
-    var detach = false
-
-    @Flag(name: .shortAndLong, help: "Keep STDIN open even if not attached")
-    var interactive = false
-
-    @Flag(name: .shortAndLong, help: "Allocate a pseudo-TTY")
-    var tty = false
 
     @Option(name: .shortAndLong, parsing: .singleValue, help: "Set environment variables (KEY=VALUE)")
     var env: [String] = []
@@ -52,6 +43,12 @@ struct Run: AsyncParsableCommand {
     @Option(name: .long, help: "Restart policy (no, always, on-failure, unless-stopped)")
     var restart: String = "no"
 
+    @Flag(name: .shortAndLong, help: "Keep STDIN open even if not attached")
+    var interactive = false
+
+    @Flag(name: .shortAndLong, help: "Allocate a pseudo-TTY")
+    var tty = false
+
     @Option(name: .shortAndLong, help: "Username or UID (format: <name|uid>[:<group|gid>])")
     var user: String?
 
@@ -61,10 +58,10 @@ struct Run: AsyncParsableCommand {
     @Option(name: .long, help: "Set platform (e.g. linux/amd64, linux/arm64)")
     var platform: String?
 
-    @Option(name: .long, help: "Pull image before running (\"always\", \"missing\", \"never\")")
+    @Option(name: .long, help: "Pull image before creating (\"always\", \"missing\", \"never\")")
     var pull: String = "missing"
 
-    @Flag(name: .long, help: "Run an init inside the container that forwards signals and reaps processes")
+    @Flag(name: .long, help: "Run an init inside the container")
     var `init` = false
 
     @Option(name: .long, parsing: .singleValue, help: "Set custom DNS servers")
@@ -152,9 +149,6 @@ struct Run: AsyncParsableCommand {
 
     @Option(name: .customLong("cpuset-mems"), help: "MEMs in which to allow execution (0-3, 0,1)")
     var cpusetMems: String?
-
-    @Option(name: .customLong("detach-keys"), help: "Override the key sequence for detaching a container")
-    var detachKeys: String?
 
     @Option(name: .long, parsing: .singleValue, help: "Add a host device to the container")
     var device: [String] = []
@@ -279,9 +273,6 @@ struct Run: AsyncParsableCommand {
     @Option(name: .customLong("security-opt"), parsing: .singleValue, help: "Security Options")
     var securityOpt: [String] = []
 
-    @Flag(name: .customLong("sig-proxy"), inversion: .prefixedNo, help: "Proxy received signals to the process")
-    var sigProxy = true
-
     @Option(name: .customLong("storage-opt"), parsing: .singleValue, help: "Storage driver options for the container")
     var storageOpt: [String] = []
 
@@ -313,7 +304,6 @@ struct Run: AsyncParsableCommand {
 
         var environment: [String: String] = [:]
 
-        // 1. Read from --env-file if provided
         if let envFilePath = envFile {
             let fileURL = URL(fileURLWithPath: envFilePath)
             let content = try String(contentsOf: fileURL, encoding: .utf8)
@@ -326,7 +316,6 @@ struct Run: AsyncParsableCommand {
             }
         }
 
-        // 2. Add from -e/--env (overrides --env-file)
         for item in env {
             let parts = item.split(separator: "=", maxSplits: 1)
             guard parts.count == 2 else { continue }
@@ -354,7 +343,7 @@ struct Run: AsyncParsableCommand {
             ports: ports,
             volumes: volumes,
             network: network,
-            detach: detach,
+            detach: true,
             interactive: interactive,
             tty: tty,
             labels: labels,
@@ -378,20 +367,7 @@ struct Run: AsyncParsableCommand {
             cpus: cpus
         )
 
-        let container = try await engine.run(containerConfig)
-
-        if detach {
-            // Detached mode: print full container ID
-            print(container.id)
-        } else {
-            // Foreground mode: show container output
-            let lines = try await engine.logs(container.id)
-            for line in lines {
-                print(line)
-            }
-            if rm {
-                _ = try? await engine.remove(container.id, force: true)
-            }
-        }
+        let container = try await engine.create(containerConfig)
+        print(container.id)
     }
 }

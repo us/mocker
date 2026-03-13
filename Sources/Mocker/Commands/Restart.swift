@@ -1,9 +1,9 @@
 import ArgumentParser
 import MockerKit
 
-struct Stop: AsyncParsableCommand {
+struct Restart: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Stop one or more running containers"
+        abstract: "Restart one or more containers"
     )
 
     @Argument(help: "Container name or ID")
@@ -21,7 +21,7 @@ struct Stop: AsyncParsableCommand {
 
         for identifier in containers {
             _ = try await engine.stop(identifier)
-            // Docker echoes back exactly what the user provided
+            _ = try await engine.start(identifier)
             print(identifier)
         }
     }

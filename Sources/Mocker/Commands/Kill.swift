@@ -1,27 +1,24 @@
 import ArgumentParser
 import MockerKit
 
-struct Stop: AsyncParsableCommand {
+struct Kill: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Stop one or more running containers"
+        abstract: "Kill one or more running containers"
     )
 
     @Argument(help: "Container name or ID")
     var containers: [String]
 
-    @Option(name: .shortAndLong, help: "Seconds to wait before killing the container")
-    var timeout: Int = 10
-
     @Option(name: .shortAndLong, help: "Signal to send to the container")
-    var signal: String?
+    var signal: String = "KILL"
 
     func run() async throws {
         let config = MockerConfig()
         let engine = try ContainerEngine(config: config)
 
         for identifier in containers {
+            // kill is essentially a forceful stop
             _ = try await engine.stop(identifier)
-            // Docker echoes back exactly what the user provided
             print(identifier)
         }
     }

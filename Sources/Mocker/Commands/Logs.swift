@@ -12,8 +12,20 @@ struct Logs: AsyncParsableCommand {
     @Flag(name: .shortAndLong, help: "Follow log output")
     var follow = false
 
-    @Option(name: .long, help: "Number of lines to show from the end")
+    @Option(name: [.customShort("n"), .long], help: "Number of lines to show from the end of the logs")
     var tail: Int?
+
+    @Option(name: .long, help: "Show logs since timestamp (e.g. 2021-01-01T00:00:00Z)")
+    var since: String?
+
+    @Option(name: .long, help: "Show logs before a timestamp")
+    var until: String?
+
+    @Flag(name: .shortAndLong, help: "Show timestamps")
+    var timestamps = false
+
+    @Flag(name: .long, help: "Show extra details provided to logs")
+    var details = false
 
     func run() async throws {
         let config = MockerConfig()

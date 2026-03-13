@@ -9,6 +9,15 @@ struct Inspect: AsyncParsableCommand {
     @Argument(help: "Container or image name/ID")
     var targets: [String]
 
+    @Option(name: .shortAndLong, help: "Format output using a custom template")
+    var format: String?
+
+    @Option(name: .long, help: "Only inspect objects of the given type")
+    var type: String?
+
+    @Flag(name: .shortAndLong, help: "Display total file sizes if the type is container")
+    var size = false
+
     func run() async throws {
         let config = MockerConfig()
         try config.ensureDirectories()

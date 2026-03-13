@@ -17,6 +17,42 @@
 
 Mocker 是一款 **Docker 兼容的 CLI + Compose** 工具，使用 Apple 的 [Containerization](https://developer.apple.com/documentation/containerization) 框架（macOS 26+）在 macOS 上原生运行。它与 Docker 使用相同的命令、相同的参数和相同的输出格式，让您现有的脚本和操作习惯无缝迁移。
 
+## 只需将 `docker` 替换为 `mocker`
+
+```bash
+# 之前
+docker compose up -d
+docker ps
+docker logs my-app
+docker exec -it my-app sh
+
+# 之后 — 相同命令，原生 Apple 运行时，无需 Docker Desktop
+mocker compose up -d
+mocker ps
+mocker logs my-app
+mocker exec -it my-app sh
+```
+
+您现有的 `docker-compose.yml` 无需修改即可使用。
+
+## 最新更新
+
+### v0.1.8 — `--env-file` 支持
+- **`mocker run --env-file .env`** — 从文件加载环境变量，与 Docker 用法一致
+- CI：添加 macOS 26 运行器的 PR 测试工作流
+
+### v0.1.7 — Compose 改进 & `--rm` 参数
+- **`mocker run --rm`** — 容器退出后自动删除
+- `compose.yaml` / `compose.yml` 现已被识别为默认 compose 文件（不仅限于 `docker-compose.yml`）
+- Compose `${VAR:-default}` 变量替换现已正确工作
+- 命名卷跳过 virtiofs 绑定挂载以提高兼容性
+- 添加 AGPL-3.0 许可证
+
+### v0.1.6 — 卷路径修复
+- 命名卷现在在 compose 服务中正确解析为主机路径
+
+> 查看 [CHANGELOG.md](CHANGELOG.md) 了解完整版本历史。
+
 ## 功能特性
 
 - **完整 Docker CLI 兼容** — `run`、`ps`、`stop`、`rm`、`exec`、`logs`、`build`、`pull`、`push`、`images`、`tag`、`rmi`、`inspect`、`stats`

@@ -1,9 +1,9 @@
 import ArgumentParser
 import MockerKit
 
-struct Rmi: AsyncParsableCommand {
+struct ImageRm: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "rmi",
+        commandName: "rm",
         abstract: "Remove one or more images"
     )
 

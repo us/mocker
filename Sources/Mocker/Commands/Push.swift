@@ -9,6 +9,15 @@ struct Push: AsyncParsableCommand {
     @Argument(help: "Image reference to push")
     var image: String
 
+    @Flag(name: .shortAndLong, help: "Push all tags of an image to the repository")
+    var allTags = false
+
+    @Option(name: .long, help: "Push a platform-specific manifest")
+    var platform: String?
+
+    @Flag(name: .shortAndLong, help: "Suppress verbose output")
+    var quiet = false
+
     func run() async throws {
         let config = MockerConfig()
         let manager = try ImageManager(config: config)

@@ -111,7 +111,7 @@ public actor ImageManager {
     private static let containerCLI = "/usr/local/bin/container"
 
     /// Build an image from a Dockerfile using the `container` CLI.
-    public func build(tag: String, context: String, dockerfile: String = "Dockerfile", noCache: Bool = false, buildArgs: [String] = []) async throws -> ImageInfo {
+    public func build(tag: String, context: String, dockerfile: String = "Dockerfile", noCache: Bool = false, buildArgs: [String] = [], platform: String? = nil, target: String? = nil) async throws -> ImageInfo {
         let contextURL: URL
         if context.hasPrefix("/") {
             contextURL = URL(fileURLWithPath: context)
@@ -129,6 +129,8 @@ public actor ImageManager {
         var args = ["build", "-t", tag, "-f", dockerfilePath]
         if noCache { args.append("--no-cache") }
         for arg in buildArgs { args += ["--build-arg", arg] }
+        if let platform { args += ["--platform", platform] }
+        if let target { args += ["--target", target] }
         args.append(context)
 
         let process = Process()

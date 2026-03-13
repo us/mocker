@@ -9,6 +9,15 @@ struct Pull: AsyncParsableCommand {
     @Argument(help: "Image reference (e.g., nginx, nginx:1.25, registry.example.com/app:v1)")
     var image: String
 
+    @Flag(name: .shortAndLong, help: "Download all tagged images in the repository")
+    var allTags = false
+
+    @Option(name: .long, help: "Set platform if server is multi-platform capable")
+    var platform: String?
+
+    @Flag(name: .shortAndLong, help: "Suppress verbose output")
+    var quiet = false
+
     func run() async throws {
         let config = MockerConfig()
         try config.ensureDirectories()

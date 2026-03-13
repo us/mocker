@@ -35,6 +35,24 @@ mocker exec -it my-app sh
 
 Your existing `docker-compose.yml` works as-is.
 
+## What's New
+
+### v0.1.8 — `--env-file` support
+- **`mocker run --env-file .env`** — load environment variables from file, just like Docker
+- CI: PR test workflow with macOS 26 runner
+
+### v0.1.7 — Compose improvements & `--rm` flag
+- **`mocker run --rm`** — auto-remove container on exit
+- `compose.yaml` / `compose.yml` recognized as default compose file (not just `docker-compose.yml`)
+- Compose `${VAR:-default}` variable substitution now works correctly
+- Named volumes skip virtiofs bind mount for compatibility
+- AGPL-3.0 license added
+
+### v0.1.6 — Volume path fix
+- Named volumes now resolve to correct host paths in compose services
+
+> See [CHANGELOG.md](CHANGELOG.md) for the full version history.
+
 ## Features
 
 - **Full Docker CLI compatibility** — `run`, `ps`, `stop`, `rm`, `exec`, `logs`, `build`, `pull`, `push`, `images`, `tag`, `rmi`, `inspect`, `stats`

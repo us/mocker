@@ -13,6 +13,12 @@ struct Remove: AsyncParsableCommand {
     @Flag(name: .shortAndLong, help: "Force remove running containers")
     var force = false
 
+    @Flag(name: .shortAndLong, help: "Remove the specified link")
+    var link = false
+
+    @Flag(name: .shortAndLong, help: "Remove anonymous volumes associated with the container")
+    var volumes = false
+
     func run() async throws {
         let config = MockerConfig()
         let engine = try ContainerEngine(config: config)

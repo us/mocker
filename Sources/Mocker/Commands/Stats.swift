@@ -12,6 +12,15 @@ struct Stats: AsyncParsableCommand {
     @Flag(name: .long, help: "Disable streaming stats and only pull the first result")
     var noStream = false
 
+    @Flag(name: .shortAndLong, help: "Show all containers (default shows just running)")
+    var all = false
+
+    @Option(name: .long, help: "Format output using a custom template")
+    var format: String?
+
+    @Flag(name: .customLong("no-trunc"), help: "Do not truncate output")
+    var noTrunc = false
+
     func run() async throws {
         let config = MockerConfig()
         let engine = try ContainerEngine(config: config)

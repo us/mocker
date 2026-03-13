@@ -16,6 +16,21 @@ public struct ContainerConfig: Codable, Sendable {
     public var workingDir: String?
     public var hostname: String?
     public var restartPolicy: RestartPolicy
+    public var user: String?
+    public var entrypoint: String?
+    public var platform: String?
+    public var dns: [String]
+    public var addHost: [String]
+    public var privileged: Bool
+    public var capAdd: [String]
+    public var capDrop: [String]
+    public var readOnly: Bool
+    public var tmpfs: [String]
+    public var shmSize: String?
+    public var stopSignal: String
+    public var stopTimeout: Int?
+    public var memory: String?
+    public var cpus: String?
 
     public init(
         name: String? = nil,
@@ -31,7 +46,22 @@ public struct ContainerConfig: Codable, Sendable {
         labels: [String: String] = [:],
         workingDir: String? = nil,
         hostname: String? = nil,
-        restartPolicy: RestartPolicy = .no
+        restartPolicy: RestartPolicy = .no,
+        user: String? = nil,
+        entrypoint: String? = nil,
+        platform: String? = nil,
+        dns: [String] = [],
+        addHost: [String] = [],
+        privileged: Bool = false,
+        capAdd: [String] = [],
+        capDrop: [String] = [],
+        readOnly: Bool = false,
+        tmpfs: [String] = [],
+        shmSize: String? = nil,
+        stopSignal: String = "SIGTERM",
+        stopTimeout: Int? = nil,
+        memory: String? = nil,
+        cpus: String? = nil
     ) {
         self.name = name
         self.image = image
@@ -47,6 +77,21 @@ public struct ContainerConfig: Codable, Sendable {
         self.workingDir = workingDir
         self.hostname = hostname
         self.restartPolicy = restartPolicy
+        self.user = user
+        self.entrypoint = entrypoint
+        self.platform = platform
+        self.dns = dns
+        self.addHost = addHost
+        self.privileged = privileged
+        self.capAdd = capAdd
+        self.capDrop = capDrop
+        self.readOnly = readOnly
+        self.tmpfs = tmpfs
+        self.shmSize = shmSize
+        self.stopSignal = stopSignal
+        self.stopTimeout = stopTimeout
+        self.memory = memory
+        self.cpus = cpus
     }
 }
 

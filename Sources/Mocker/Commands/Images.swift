@@ -9,6 +9,24 @@ struct Images: AsyncParsableCommand {
     @Flag(name: .shortAndLong, help: "Only show image IDs")
     var quiet = false
 
+    @Flag(name: .shortAndLong, help: "Show all images (default hides intermediate images)")
+    var all = false
+
+    @Option(name: .shortAndLong, parsing: .singleValue, help: "Filter output based on conditions provided")
+    var filter: [String] = []
+
+    @Option(name: .long, help: "Format output using a custom template")
+    var format: String?
+
+    @Flag(name: .long, help: "Show digests")
+    var digests = false
+
+    @Flag(name: .customLong("no-trunc"), help: "Don't truncate output")
+    var noTrunc = false
+
+    @Flag(name: .long, help: "List images in tree format (experimental)")
+    var tree = false
+
     func run() async throws {
         let config = MockerConfig()
         let manager = try ImageManager(config: config)

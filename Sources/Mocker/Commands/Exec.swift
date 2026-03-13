@@ -12,10 +12,10 @@ struct Exec: AsyncParsableCommand {
     @Argument(help: "Command to execute")
     var command: [String]
 
-    @Flag(name: .short, help: "Keep STDIN open")
+    @Flag(name: .shortAndLong, help: "Keep STDIN open even if not attached")
     var interactive = false
 
-    @Flag(name: .short, help: "Allocate a pseudo-TTY")
+    @Flag(name: .shortAndLong, help: "Allocate a pseudo-TTY")
     var tty = false
 
     @Option(name: .shortAndLong, parsing: .singleValue, help: "Set environment variables")
@@ -23,6 +23,21 @@ struct Exec: AsyncParsableCommand {
 
     @Option(name: .shortAndLong, help: "Working directory inside the container")
     var workdir: String?
+
+    @Flag(name: .shortAndLong, help: "Detached mode: run command in the background")
+    var detach = false
+
+    @Option(name: .customLong("detach-keys"), help: "Override the key sequence for detaching a container")
+    var detachKeys: String?
+
+    @Option(name: .shortAndLong, help: "Username or UID")
+    var user: String?
+
+    @Option(name: .customLong("env-file"), parsing: .singleValue, help: "Read in a file of environment variables")
+    var envFile: [String] = []
+
+    @Flag(name: .long, help: "Give extended privileges to the command")
+    var privileged = false
 
     func run() async throws {
         let config = MockerConfig()
