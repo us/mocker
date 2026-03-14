@@ -2,7 +2,7 @@
 
 Docker-compatible container management tool built on Apple Containerization framework (macOS 26+).
 
-> **111 commands & subcommands** — 100% flag-compatible with Docker CLI.
+> **111 commands & subcommands** — full flag compatibility with Docker CLI.
 
 ---
 

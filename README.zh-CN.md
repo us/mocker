@@ -37,8 +37,8 @@ mocker exec -it my-app sh
 
 ## 最新更新
 
-### v0.2.0 — 100% Docker CLI 兼容
-- **111 个命令/子命令**现已与 Docker 的参数完全一致
+### v0.1.9 — 完整 Docker CLI 参数兼容
+- **111 个命令/子命令**与 Docker 参数匹配
 - `run`/`create`：新增约 50 个参数（`--attach`、`--cpu-shares`、`--gpus`、`--init`、`--memory`、`--privileged`、`--restart`、`--shm-size`、`--ulimit` 等）
 - `build`：新增约 25 个 BuildKit/Buildx 参数（`--cache-from`、`--load`、`--push`、`--secret`、`--ssh` 等）
 - `compose`：22 个子命令共新增 200+ 个参数
@@ -392,7 +392,7 @@ Mocker 将容器生命周期（run、stop、exec、logs、build）委托给 Appl
 
 ## 路线图
 
-- [x] 完整 Docker CLI 参数兼容（111 个命令，所有参数匹配）
+- [x] 完整 Docker CLI 参数兼容（111 个命令）
 - [x] Docker Compose v2 支持
 - [x] 网络与卷管理
 - [ ] MenuBar GUI

@@ -37,8 +37,8 @@ Your existing `docker-compose.yml` works as-is.
 
 ## What's New
 
-### v0.2.0 — 100% Docker CLI Compatibility
-- **111 commands/subcommands** now match Docker's flags one-for-one
+### v0.1.9 — Full Docker CLI Flag Compatibility
+- **111 commands/subcommands** with Docker-matching flags
 - `run`/`create`: ~50 new flags (`--attach`, `--cpu-shares`, `--gpus`, `--init`, `--memory`, `--privileged`, `--restart`, `--shm-size`, `--ulimit`, etc.)
 - `build`: ~25 BuildKit/Buildx flags (`--cache-from`, `--load`, `--push`, `--secret`, `--ssh`, etc.)
 - `compose`: ~200+ flags across 22 subcommands
@@ -393,7 +393,7 @@ approach gives you a fully working Docker-compatible tool on macOS 26 today:
 
 ## Roadmap
 
-- [x] Full Docker CLI flag compatibility (111 commands, every flag matched)
+- [x] Full Docker CLI flag compatibility (111 commands)
 - [x] Docker Compose v2 support
 - [x] Network & Volume management
 - [ ] MenuBar GUI

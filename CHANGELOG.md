@@ -5,10 +5,10 @@ All notable changes to Mocker are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.9] - 2026-03-14
 
 ### Added
-- **100% Docker CLI flag compatibility** across all 111 commands/subcommands
+- **Full Docker CLI flag compatibility** across all 111 commands/subcommands
 - `mocker commit` command with `--author`, `--change`, `--message`, `--no-pause`
 - `mocker container prune` command with `--filter`, `--force`
 - `mocker container export` (moved under `container` subcommand group)
@@ -110,7 +110,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - JSON state persistence in `~/.mocker/`
 - Swift 6 actor-based concurrency throughout
 
-[Unreleased]: https://github.com/us/mocker/compare/v0.1.8...HEAD
+[0.1.9]: https://github.com/us/mocker/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/us/mocker/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/us/mocker/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/us/mocker/compare/v0.1.5...v0.1.6
