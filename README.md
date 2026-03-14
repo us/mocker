@@ -393,7 +393,7 @@ approach gives you a fully working Docker-compatible tool on macOS 26 today:
 
 ## Roadmap
 
-- [x] Full Docker CLI command set
+- [x] Full Docker CLI flag compatibility (111 commands, every flag matched)
 - [x] Docker Compose v2 support
 - [x] Network & Volume management
 - [ ] MenuBar GUI

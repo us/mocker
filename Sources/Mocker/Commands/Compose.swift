@@ -30,6 +30,18 @@ struct ComposeCommand: AsyncParsableCommand {
             ComposeUnpause.self,
             ComposeLs.self,
             ComposeCp.self,
+            ComposeEvents.self,
+            ComposeAttach.self,
+            ComposeCommit.self,
+            ComposeExport.self,
+            ComposeScale.self,
+            ComposeStats.self,
+            ComposeVersion.self,
+            ComposeVolumes.self,
+            ComposeWait.self,
+            ComposeWatch.self,
+            ComposeBridge.self,
+            ComposePublish.self,
         ]
     )
 }
@@ -1517,5 +1529,353 @@ struct ComposeCp: AsyncParsableCommand {
                 try await engine.copyToContainer(containerName, path: dstParts[1], data: data)
             }
         }
+    }
+}
+
+// MARK: - Compose Events
+
+struct ComposeEvents: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "events",
+        abstract: "Receive real time events from containers"
+    )
+
+    @OptionGroup var options: ComposeOptions
+
+    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
+    var dryRun = false
+
+    @Flag(name: .long, help: "Output events as a stream of json objects")
+    var json = false
+
+    @Option(name: .long, help: "Show all events created since timestamp")
+    var since: String?
+
+    @Option(name: .long, help: "Stream events until this timestamp")
+    var until: String?
+
+    @Argument(help: "Service names")
+    var services: [String] = []
+
+    func run() async throws {
+        throw MockerError.operationFailed("compose events is not yet supported with Apple Containerization")
+    }
+}
+
+// MARK: - Compose Attach
+
+struct ComposeAttach: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "attach",
+        abstract: "Attach local standard input, output, and error streams to a service's running container"
+    )
+
+    @OptionGroup var options: ComposeOptions
+
+    @Option(name: .customLong("detach-keys"), help: "Override the key sequence for detaching from a container")
+    var detachKeys: String?
+
+    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
+    var dryRun = false
+
+    @Option(name: .long, help: "Index of the container if service has multiple replicas")
+    var index: Int?
+
+    @Flag(name: .customLong("no-stdin"), help: "Do not attach STDIN")
+    var noStdin = false
+
+    @Flag(name: .customLong("sig-proxy"), help: "Proxy all received signals to the process")
+    var sigProxy = false
+
+    @Argument(help: "Service name")
+    var service: String
+
+    func run() async throws {
+        let (_, project) = try options.loadCompose()
+        let config = MockerConfig()
+        let engine = try ContainerEngine(config: config)
+        let idx = index ?? 1
+        let containerName = "\(project)-\(service)-\(idx)"
+        try await engine.exec(containerName, command: [])
+    }
+}
+
+// MARK: - Compose Commit
+
+struct ComposeCommit: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "commit",
+        abstract: "Create a new image from a service container's changes"
+    )
+
+    @OptionGroup var options: ComposeOptions
+
+    @Option(name: [.customShort("a"), .long], help: "Author (e.g., \"John Hannibal Smith <hannibal@a-team.com>\")")
+    var author: String?
+
+    @Option(name: [.customShort("c"), .long], parsing: .singleValue, help: "Apply Dockerfile instruction to the created image")
+    var change: [String] = []
+
+    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
+    var dryRun = false
+
+    @Option(name: .long, help: "Index of the container if service has multiple replicas")
+    var index: Int?
+
+    @Option(name: [.customShort("m"), .long], help: "Commit message")
+    var message: String?
+
+    @Flag(name: .long, help: "Pause container during commit")
+    var pause = false
+
+    @Argument(help: "Service name")
+    var service: String
+
+    @Argument(help: "Repository[:tag]")
+    var repository: String?
+
+    func run() async throws {
+        throw MockerError.operationFailed("compose commit is not yet supported with Apple Containerization")
+    }
+}
+
+// MARK: - Compose Export
+
+struct ComposeExport: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "export",
+        abstract: "Export a service container's filesystem as a tar archive"
+    )
+
+    @OptionGroup var options: ComposeOptions
+
+    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
+    var dryRun = false
+
+    @Option(name: .long, help: "Index of the container if service has multiple replicas")
+    var index: Int?
+
+    @Option(name: [.customShort("o"), .long], help: "Write to a file, instead of STDOUT")
+    var output: String?
+
+    @Argument(help: "Service name")
+    var service: String
+
+    func run() async throws {
+        throw MockerError.operationFailed("compose export is not yet supported with Apple Containerization")
+    }
+}
+
+// MARK: - Compose Scale
+
+struct ComposeScale: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "scale",
+        abstract: "Scale services"
+    )
+
+    @OptionGroup var options: ComposeOptions
+
+    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
+    var dryRun = false
+
+    @Flag(name: .customLong("no-deps"), help: "Don't start linked services")
+    var noDeps = false
+
+    @Argument(help: "Service=num pairs (e.g. web=3)")
+    var scales: [String] = []
+
+    func run() async throws {
+        throw MockerError.operationFailed("compose scale is not yet supported with Apple Containerization")
+    }
+}
+
+// MARK: - Compose Stats
+
+struct ComposeStats: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "stats",
+        abstract: "Display a live stream of container(s) resource usage statistics"
+    )
+
+    @OptionGroup var options: ComposeOptions
+
+    @Flag(name: .shortAndLong, help: "Show all containers (default shows just running)")
+    var all = false
+
+    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
+    var dryRun = false
+
+    @Option(name: .long, help: "Format output using a custom template")
+    var format: String?
+
+    @Flag(name: .customLong("no-stream"), help: "Disable streaming stats and only pull the first result")
+    var noStream = false
+
+    @Flag(name: .customLong("no-trunc"), help: "Do not truncate output")
+    var noTrunc = false
+
+    @Argument(help: "Service names")
+    var services: [String] = []
+
+    func run() async throws {
+        throw MockerError.operationFailed("compose stats is not yet supported with Apple Containerization")
+    }
+}
+
+// MARK: - Compose Version
+
+struct ComposeVersion: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "version",
+        abstract: "Show the Docker Compose version information"
+    )
+
+    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
+    var dryRun = false
+
+    @Option(name: .shortAndLong, help: "Format the output (pretty|json)")
+    var format: String?
+
+    @Flag(name: .long, help: "Shows only Compose's version number")
+    var short = false
+
+    func run() async throws {
+        print("Mocker Compose version v0.2.0")
+    }
+}
+
+// MARK: - Compose Volumes
+
+struct ComposeVolumes: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "volumes",
+        abstract: "List volumes"
+    )
+
+    @OptionGroup var options: ComposeOptions
+
+    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
+    var dryRun = false
+
+    @Option(name: .long, help: "Format output using a custom template")
+    var format: String?
+
+    @Flag(name: .shortAndLong, help: "Only display volume names")
+    var quiet = false
+
+    func run() async throws {
+        let (composeFile, _) = try options.loadCompose()
+        for (name, _) in composeFile.volumes {
+            print(name)
+        }
+    }
+}
+
+// MARK: - Compose Wait
+
+struct ComposeWait: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "wait",
+        abstract: "Block until containers of all (or specified) services stop"
+    )
+
+    @OptionGroup var options: ComposeOptions
+
+    @Flag(name: .customLong("down-project"), help: "Drops project when the first container stops")
+    var downProject = false
+
+    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
+    var dryRun = false
+
+    @Argument(help: "Service names")
+    var services: [String] = []
+
+    func run() async throws {
+        throw MockerError.operationFailed("compose wait is not yet supported with Apple Containerization")
+    }
+}
+
+// MARK: - Compose Watch
+
+struct ComposeWatch: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "watch",
+        abstract: "Watch build context for service and rebuild/refresh containers when files are updated"
+    )
+
+    @OptionGroup var options: ComposeOptions
+
+    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
+    var dryRun = false
+
+    @Flag(name: .customLong("no-up"), help: "Do not build & start services before watching")
+    var noUp = false
+
+    @Flag(name: .long, help: "Prune dangling images on rebuild")
+    var prune = false
+
+    @Flag(name: .shortAndLong, help: "Hide build output")
+    var quiet = false
+
+    @Argument(help: "Service names")
+    var services: [String] = []
+
+    func run() async throws {
+        throw MockerError.operationFailed("compose watch is not yet supported with Apple Containerization")
+    }
+}
+
+// MARK: - Compose Bridge
+
+struct ComposeBridge: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "bridge",
+        abstract: "Convert compose files into another model"
+    )
+
+    @OptionGroup var options: ComposeOptions
+
+    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
+    var dryRun = false
+
+    func run() async throws {
+        throw MockerError.operationFailed("compose bridge is not yet supported with Apple Containerization")
+    }
+}
+
+// MARK: - Compose Publish
+
+struct ComposePublish: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "publish",
+        abstract: "Publish compose application"
+    )
+
+    @OptionGroup var options: ComposeOptions
+
+    @Flag(name: .long, help: "Published compose application (includes env)")
+    var app = false
+
+    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
+    var dryRun = false
+
+    @Option(name: .customLong("oci-version"), help: "OCI image/artifact specification version")
+    var ociVersion: String?
+
+    @Flag(name: .customLong("resolve-image-digests"), help: "Pin image tags to digests")
+    var resolveImageDigests = false
+
+    @Flag(name: .customLong("with-env"), help: "Include environment variables in the published application")
+    var withEnv = false
+
+    @Flag(name: [.customShort("y"), .long], help: "Assume \"yes\" as answer to all prompts")
+    var yes = false
+
+    @Argument(help: "Repository for the published image")
+    var repository: String
+
+    func run() async throws {
+        throw MockerError.operationFailed("compose publish is not yet supported with Apple Containerization")
     }
 }

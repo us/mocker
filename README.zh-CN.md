@@ -392,7 +392,7 @@ Mocker 将容器生命周期（run、stop、exec、logs、build）委托给 Appl
 
 ## 路线图
 
-- [x] 完整 Docker CLI 命令集
+- [x] 完整 Docker CLI 参数兼容（111 个命令，所有参数匹配）
 - [x] Docker Compose v2 支持
 - [x] 网络与卷管理
 - [ ] MenuBar GUI
