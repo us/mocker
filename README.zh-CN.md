@@ -37,19 +37,21 @@ mocker exec -it my-app sh
 
 ## 最新更新
 
+### v0.2.0 — 100% Docker CLI 兼容
+- **111 个命令/子命令**现已与 Docker 的参数完全一致
+- `run`/`create`：新增约 50 个参数（`--attach`、`--cpu-shares`、`--gpus`、`--init`、`--memory`、`--privileged`、`--restart`、`--shm-size`、`--ulimit` 等）
+- `build`：新增约 25 个 BuildKit/Buildx 参数（`--cache-from`、`--load`、`--push`、`--secret`、`--ssh` 等）
+- `compose`：22 个子命令共新增 200+ 个参数
+- 新命令：`commit`、`container prune`、`container export`、`image rm/inspect/prune`
+- 添加完整的 [COMMANDS.md](COMMANDS.md) 参考文档和 [CHANGELOG.md](CHANGELOG.md)
+
 ### v0.1.8 — `--env-file` 支持
 - **`mocker run --env-file .env`** — 从文件加载环境变量，与 Docker 用法一致
-- CI：添加 macOS 26 运行器的 PR 测试工作流
 
 ### v0.1.7 — Compose 改进 & `--rm` 参数
 - **`mocker run --rm`** — 容器退出后自动删除
-- `compose.yaml` / `compose.yml` 现已被识别为默认 compose 文件（不仅限于 `docker-compose.yml`）
-- Compose `${VAR:-default}` 变量替换现已正确工作
-- 命名卷跳过 virtiofs 绑定挂载以提高兼容性
-- 添加 AGPL-3.0 许可证
-
-### v0.1.6 — 卷路径修复
-- 命名卷现在在 compose 服务中正确解析为主机路径
+- `compose.yaml` / `compose.yml` 现已被识别为默认 compose 文件
+- Compose `${VAR:-default}` 变量替换修复
 
 > 查看 [CHANGELOG.md](CHANGELOG.md) 了解完整版本历史。
 
