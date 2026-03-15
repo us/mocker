@@ -1,0 +1,60 @@
+name: Release Please
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout
+        if: ${{ steps.release.outputs.release_created }}
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Update README What's New from CHANGELOG
+        if: ${{ steps.release.outputs.release_created }}
+        run: |
+          if ! grep -q "## What's New" README.md; then
+            echo "No What's New section found in README.md, skipping."
+            exit 0
+          fi
+
+          VERSION="${{ steps.release.outputs.tag_name }}"
+          VERSION_NUMBER="${VERSION#v}"
+
+          # Extract the latest release section from CHANGELOG.md
+          CHANGELOG_ENTRY=$(sed -n "/^## \[${VERSION_NUMBER}\]/,/^## \[/{ /^## \[${VERSION_NUMBER}\]/d; /^## \[/d; p; }" CHANGELOG.md)
+
+          if [ -z "$CHANGELOG_ENTRY" ]; then
+            echo "No changelog entry found for ${VERSION_NUMBER}, skipping."
+            exit 0
+          fi
+
+          # Build the new What's New section
+          NEW_SECTION="## What's New\n\n### ${VERSION}\n\n${CHANGELOG_ENTRY}"
+
+          # Replace the What's New section in README (from "## What's New" to next "## ")
+          awk -v new_section="$NEW_SECTION" '
+            /^## What'\''s New/ { print new_section; skip=1; next }
+            /^## / && skip { skip=0 }
+            !skip { print }
+          ' README.md > README.tmp && mv README.tmp README.md
+
+          git config user.email "rahmetsaritekin@gmail.com"
+          git config user.name "us"
+          git add README.md
+          git diff --cached --quiet || git commit -m "docs: update README What's New for ${VERSION}"
+          git push
