@@ -2,7 +2,10 @@
 
 Docker-compatible container management tool built on Apple Containerization framework (macOS 26+).
 
-> **111 commands & subcommands** — full flag compatibility with Docker CLI.
+> **111 commands & subcommands** — Docker CLI compatible (with Apple runtime limitations).
+>
+> Commands marked `[unsupported]` accept Docker-compatible flags but are not yet functional.
+> They will return an explicit error explaining the limitation.
 
 ---
 
@@ -130,7 +133,7 @@ mocker run [OPTIONS] IMAGE [COMMAND...]
 | `--volume-driver` | | Optional volume driver for the container |
 | `--volumes-from` | | Mount volumes from the specified container(s) |
 
-### `mocker create`
+### `mocker create` [unsupported]
 
 Create a new container (without starting it). Same flags as `run` except no `--detach-keys` or `--sig-proxy`.
 
@@ -212,7 +215,7 @@ mocker rm [OPTIONS] CONTAINER [CONTAINER...]
 | `--link` | `-l` | Remove the specified link |
 | `--volumes` | `-v` | Remove anonymous volumes associated with the container |
 
-### `mocker pause`
+### `mocker pause` [unsupported]
 
 Pause all processes within one or more containers.
 
@@ -220,7 +223,7 @@ Pause all processes within one or more containers.
 mocker pause CONTAINER [CONTAINER...]
 ```
 
-### `mocker unpause`
+### `mocker unpause` [unsupported]
 
 Unpause all processes within one or more containers.
 
@@ -356,7 +359,7 @@ mocker attach [OPTIONS] CONTAINER
 | `--no-stdin` | | Do not attach STDIN |
 | `--sig-proxy` | | Proxy all received signals to the process (default: true) |
 
-### `mocker rename`
+### `mocker rename` [unsupported]
 
 Rename a container.
 
@@ -402,7 +405,7 @@ mocker cp [OPTIONS] SOURCE DESTINATION
 | `--follow-link` | `-L` | Always follow symbol link in SRC_PATH |
 | `--quiet` | `-q` | Suppress progress output during copy |
 
-### `mocker commit`
+### `mocker commit` [unsupported]
 
 Create a new image from a container's changes.
 
@@ -417,7 +420,7 @@ mocker commit [OPTIONS] CONTAINER [REPOSITORY[:TAG]]
 | `--message` | `-m` | Commit message |
 | `--no-pause` | | Disable pausing container during commit |
 
-### `mocker export`
+### `mocker export` [unsupported]
 
 Export a container's filesystem as a tar archive.
 
@@ -624,7 +627,7 @@ mocker search [OPTIONS] TERM
 
 ## Registry & Authentication
 
-### `mocker login`
+### `mocker login` [unsupported]
 
 Authenticate to a registry.
 
@@ -638,7 +641,7 @@ mocker login [OPTIONS] [SERVER]
 | `--password` | `-p` | Password or Personal Access Token |
 | `--password-stdin` | | Take the password from stdin |
 
-### `mocker logout`
+### `mocker logout` [unsupported]
 
 Log out from a registry.
 
@@ -1250,7 +1253,7 @@ mocker compose port [OPTIONS] SERVICE PRIVATE_PORT
 | `--index` | | Index of the container if service is scaled |
 | `--dry-run` | | Execute command in dry run mode |
 
-### `mocker compose pause`
+### `mocker compose pause` [unsupported]
 
 ```
 mocker compose pause [OPTIONS] [SERVICE...]
@@ -1260,7 +1263,7 @@ mocker compose pause [OPTIONS] [SERVICE...]
 |------|-------|-------------|
 | `--dry-run` | | Execute command in dry run mode |
 
-### `mocker compose unpause`
+### `mocker compose unpause` [unsupported]
 
 ```
 mocker compose unpause [OPTIONS] [SERVICE...]
@@ -1314,7 +1317,7 @@ Management command grouping all container operations. Subcommands: `attach`, `co
 
 Management command grouping all image operations. Subcommands: `build`, `history`, `import`, `inspect`, `ls` (default), `prune`, `pull`, `push`, `rm`, `rmi`, `save`, `tag`.
 
-### `mocker container prune`
+### `mocker container prune` [unsupported]
 
 Remove all stopped containers.
 
@@ -1332,7 +1335,7 @@ Display detailed information on one or more images.
 | `--format` | `-f` | Format output using a custom template |
 | `--platform` | | Inspect a specific platform of the multi-platform image |
 
-### `mocker image prune`
+### `mocker image prune` [unsupported]
 
 Remove unused images.
 

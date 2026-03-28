@@ -52,9 +52,19 @@ public actor VolumeManager {
         return info
     }
 
-    /// List all volumes.
+    /// List all volumes, filtering out stale entries where _data/ no longer exists.
     public func list() -> [VolumeInfo] {
-        Array(volumes.values).sorted { $0.name < $1.name }
+        let fm = FileManager.default
+        var stale: [String] = []
+        for (name, vol) in volumes {
+            if !fm.fileExists(atPath: vol.mountpoint) {
+                stale.append(name)
+            }
+        }
+        for name in stale {
+            volumes.removeValue(forKey: name)
+        }
+        return Array(volumes.values).sorted { $0.name < $1.name }
     }
 
     /// Remove a volume.

@@ -38,7 +38,7 @@ struct SystemInfo: AsyncParsableCommand {
         let info = ProcessInfo.processInfo
 
         print("Client:")
-        print(" Version:    0.1.0")
+        print(" Version:    \(Version.currentVersion)")
         print(" Context:    default")
         print("")
         print("Server:")
@@ -47,7 +47,7 @@ struct SystemInfo: AsyncParsableCommand {
         print("  Paused:    \(paused)")
         print("  Stopped:   \(stopped)")
         print(" Images:     \(images.count)")
-        print(" Server Version: 0.1.0")
+        print(" Server Version: \(Version.currentVersion)")
         print(" Storage Driver: json-file")
         print(" Operating System: macOS \(info.operatingSystemVersionString)")
         print(" Architecture: \(architectureString())")

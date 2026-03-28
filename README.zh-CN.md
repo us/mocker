@@ -57,13 +57,15 @@ mocker exec -it my-app sh
 
 ## 功能特性
 
-- **完整 Docker CLI 兼容** — `run`、`ps`、`stop`、`rm`、`exec`、`logs`、`build`、`pull`、`push`、`images`、`tag`、`rmi`、`inspect`、`stats`
+- **Docker CLI 兼容** — `run`、`ps`、`stop`、`rm`、`exec`、`logs`、`build`、`pull`、`push`、`images`、`tag`、`rmi`、`inspect`、`stats`
 - **网络管理** — `network create/ls/rm/inspect/connect/disconnect`
 - **卷管理** — `volume create/ls/rm/inspect`
 - **Docker Compose v2** — `compose up/down/ps/logs/restart`，支持依赖顺序启动
 - **MenuBar GUI** — 原生 SwiftUI 应用 *(即将推出)*
 - **JSON 状态持久化** — 所有元数据存储于 `~/.mocker/`
 - **Swift 6 并发** — 全程基于 actor 的线程安全设计
+
+> **兼容性说明：** Mocker 解析所有 Docker CLI 参数以实现无缝兼容，但部分参数不受 Apple Containerization 运行时支持，会产生警告或错误。详见 [COMMANDS.md](COMMANDS.md) 了解哪些命令完全可用，哪些尚不支持。
 
 ## 系统要求
 

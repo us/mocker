@@ -25,9 +25,10 @@ public actor ContainerEngine {
     // MARK: - Create (without starting)
 
     public func create(_ containerConfig: ContainerConfig) async throws -> ContainerInfo {
-        // Create is the same as run since Apple's container CLI starts immediately.
-        // We create it in a "created" state conceptually, but the runtime starts it.
-        return try await run(containerConfig)
+        // Apple's container CLI does not support create-without-start.
+        throw MockerError.operationFailed(
+            "container create is not supported by Apple Containerization runtime. Use 'mocker run' instead."
+        )
     }
 
     // MARK: - Run
@@ -75,8 +76,55 @@ public actor ContainerEngine {
             args += ["--add-host", host]
         }
 
-        // Detach by default (we track state)
-        args += ["-d"]
+        // Apple CLI supported flags
+        if let hostname = containerConfig.hostname, !hostname.isEmpty {
+            // Note: Apple CLI uses --name for hostname — we pass a separate --name above
+            // hostname is stored in metadata only; Apple CLI doesn't have a --hostname flag
+        }
+
+        for label in containerConfig.labels {
+            args += ["-l", "\(label.key)=\(label.value)"]
+        }
+
+        if let cidfile = containerConfig.cidfile, !cidfile.isEmpty {
+            args += ["--cidfile", cidfile]
+        }
+
+        if containerConfig.interactive { args.append("-i") }
+        if containerConfig.tty { args.append("-t") }
+
+        if let cpus = containerConfig.cpus {
+            args += ["-c", String(cpus)]
+        }
+
+        if let memory = containerConfig.memory {
+            args += ["-m", memory]
+        }
+
+        for t in containerConfig.tmpfs {
+            args += ["--tmpfs", t]
+        }
+
+        if containerConfig.rm { args.append("--rm") }
+
+        for dnsSearch in containerConfig.dnsSearch {
+            args += ["--dns-search", dnsSearch]
+        }
+
+        for dnsOpt in containerConfig.dnsOption {
+            args += ["--dns-option", dnsOpt]
+        }
+
+        if let platform = containerConfig.platform, !platform.isEmpty {
+            let parts = platform.split(separator: "/")
+            if parts.count >= 1 { args += ["--os", String(parts[0])] }
+            if parts.count >= 2 { args += ["--arch", String(parts[1])] }
+        }
+
+        // Detach by default unless interactive
+        if !containerConfig.interactive {
+            args += ["-d"]
+        }
 
         args.append(containerConfig.image)
         args += containerConfig.command
@@ -321,9 +369,10 @@ public actor ContainerEngine {
     // MARK: - Rename
 
     public func rename(_ identifier: String, to newName: String) async throws {
-        var container = try await resolve(identifier)
-        container.name = newName
-        try await store.save(container)
+        // Apple Containerization does not support container rename
+        throw MockerError.operationFailed(
+            "container rename is not supported by Apple Containerization runtime"
+        )
     }
 
     // MARK: - Copy
@@ -339,9 +388,25 @@ public actor ContainerEngine {
 
     public func copyToContainer(_ identifier: String, path: String, data: Data) async throws {
         let container = try await resolve(identifier)
-        // Write data via exec with shell redirection
+        // Write data via stdin pipe to tee — avoids shell interpolation (injection-safe)
         let content = String(data: data, encoding: .utf8) ?? ""
-        let (_, exitCode) = try await runCLI(["exec", container.name, "sh", "-c", "cat > \(path) << 'MOCKER_EOF'\n\(content)\nMOCKER_EOF"])
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/local/bin/container")
+        process.arguments = ["exec", "-i", container.name, "tee", "--", path]
+        let inputPipe = Pipe()
+        process.standardInput = inputPipe
+        // Discard tee stdout (it echoes input) — use /dev/null to avoid pipe-buffer hang
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        inputPipe.fileHandleForWriting.write(Data(content.utf8))
+        inputPipe.fileHandleForWriting.closeFile()
+        // Use async-safe termination handler instead of blocking waitUntilExit
+        let exitCode = await withCheckedContinuation { (continuation: CheckedContinuation<Int32, Never>) in
+            process.terminationHandler = { p in
+                continuation.resume(returning: p.terminationStatus)
+            }
+        }
         guard exitCode == 0 else {
             throw MockerError.operationFailed("failed to write to \(path) in container \(identifier)")
         }
@@ -374,23 +439,19 @@ public actor ContainerEngine {
     // MARK: - Pause / Unpause
 
     public func pause(_ identifier: String) async throws {
-        var container = try await resolve(identifier)
-        guard container.state == .running else {
-            throw MockerError.containerNotRunning(identifier)
-        }
-        container.state = .paused
-        container.status = "Paused"
-        try await store.save(container)
+        _ = try await resolve(identifier)
+        // Apple Containerization does not support pause/unpause
+        throw MockerError.operationFailed(
+            "container pause is not supported by Apple Containerization runtime"
+        )
     }
 
     public func unpause(_ identifier: String) async throws {
-        var container = try await resolve(identifier)
-        guard container.state == .paused else {
-            throw MockerError.operationFailed("Container \(identifier) is not paused")
-        }
-        container.state = .running
-        container.status = "Up"
-        try await store.save(container)
+        _ = try await resolve(identifier)
+        // Apple Containerization does not support pause/unpause
+        throw MockerError.operationFailed(
+            "container unpause is not supported by Apple Containerization runtime"
+        )
     }
 
     // MARK: - Start (stopped container)
@@ -433,7 +494,7 @@ public actor ContainerEngine {
 
             return ContainerInfo(
                 id: (cfg["id"] as? String) ?? id,
-                name: (cfg["hostname"] as? String) ?? name,
+                name: name,  // Use our assigned name, not hostname from inspect
                 image: config.image,
                 state: status == "running" ? .running : .exited,
                 status: status == "running" ? "Up Less than a second" : "Exited (0)",

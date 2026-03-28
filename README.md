@@ -57,13 +57,15 @@ Your existing `docker-compose.yml` works as-is.
 
 ## Features
 
-- **Full Docker CLI compatibility** — `run`, `ps`, `stop`, `rm`, `exec`, `logs`, `build`, `pull`, `push`, `images`, `tag`, `rmi`, `inspect`, `stats`
+- **Docker CLI compatible** — `run`, `ps`, `stop`, `rm`, `exec`, `logs`, `build`, `pull`, `push`, `images`, `tag`, `rmi`, `inspect`, `stats`
 - **Network management** — `network create/ls/rm/inspect/connect/disconnect`
 - **Volume management** — `volume create/ls/rm/inspect`
 - **Docker Compose v2** — `compose up/down/ps/logs/restart` with dependency ordering
 - **MenuBar GUI** — Native SwiftUI app *(coming soon)*
 - **JSON state persistence** — All metadata stored in `~/.mocker/`
 - **Swift 6 concurrency** — Full actor-based thread safety throughout
+
+> **Compatibility note:** Mocker parses all Docker CLI flags for drop-in compatibility, but some flags are not supported by Apple's Containerization runtime and will produce a warning or error. See [COMMANDS.md](COMMANDS.md) for details on which commands are fully functional vs unsupported.
 
 ## Requirements
 

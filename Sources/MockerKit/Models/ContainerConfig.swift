@@ -31,6 +31,10 @@ public struct ContainerConfig: Codable, Sendable {
     public var stopTimeout: Int?
     public var memory: String?
     public var cpus: String?
+    public var cidfile: String?
+    public var rm: Bool
+    public var dnsSearch: [String]
+    public var dnsOption: [String]
 
     public init(
         name: String? = nil,
@@ -61,7 +65,11 @@ public struct ContainerConfig: Codable, Sendable {
         stopSignal: String = "SIGTERM",
         stopTimeout: Int? = nil,
         memory: String? = nil,
-        cpus: String? = nil
+        cpus: String? = nil,
+        cidfile: String? = nil,
+        rm: Bool = false,
+        dnsSearch: [String] = [],
+        dnsOption: [String] = []
     ) {
         self.name = name
         self.image = image
@@ -92,6 +100,10 @@ public struct ContainerConfig: Codable, Sendable {
         self.stopTimeout = stopTimeout
         self.memory = memory
         self.cpus = cpus
+        self.cidfile = cidfile
+        self.rm = rm
+        self.dnsSearch = dnsSearch
+        self.dnsOption = dnsOption
     }
 }
 

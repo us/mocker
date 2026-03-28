@@ -6,7 +6,7 @@ struct Version: AsyncParsableCommand {
         abstract: "Show the Mocker version information"
     )
 
-    static let currentVersion = "0.1.0"
+    static let currentVersion = "0.2.0"
 
     @Option(name: .shortAndLong, help: "Format output using a custom template")
     var format: String?

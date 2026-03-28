@@ -307,6 +307,37 @@ struct Run: AsyncParsableCommand {
     var volumesFrom: [String] = []
 
     func run() async throws {
+        // Fail-fast for flags not supported by Apple Containerization runtime
+        var unsupported: [String] = []
+        if gpus != nil { unsupported.append("--gpus") }
+        if !device.isEmpty { unsupported.append("--device") }
+        if !capAdd.isEmpty { unsupported.append("--cap-add") }
+        if !capDrop.isEmpty { unsupported.append("--cap-drop") }
+        if privileged { unsupported.append("--privileged") }
+        if readOnly { unsupported.append("--read-only") }
+        if !securityOpt.isEmpty { unsupported.append("--security-opt") }
+        if pid != nil { unsupported.append("--pid") }
+        if ipc != nil { unsupported.append("--ipc") }
+        if userns != nil { unsupported.append("--userns") }
+        if cgroupParent != nil { unsupported.append("--cgroup-parent") }
+        if oomKillDisable { unsupported.append("--oom-kill-disable") }
+        if pidsLimit != nil { unsupported.append("--pids-limit") }
+        if !link.isEmpty { unsupported.append("--link") }
+        if logDriver != nil { unsupported.append("--log-driver") }
+        if runtime != nil { unsupported.append("--runtime") }
+        if isolation != nil { unsupported.append("--isolation") }
+        if !blkioWeightDevice.isEmpty { unsupported.append("--blkio-weight-device") }
+        if !deviceReadBps.isEmpty { unsupported.append("--device-read-bps") }
+        if !deviceWriteBps.isEmpty { unsupported.append("--device-write-bps") }
+        if !deviceReadIops.isEmpty { unsupported.append("--device-read-iops") }
+        if !deviceWriteIops.isEmpty { unsupported.append("--device-write-iops") }
+        if healthCmd != nil { unsupported.append("--health-cmd") }
+        if `init` { unsupported.append("--init") }
+        if !unsupported.isEmpty {
+            let flags = unsupported.joined(separator: ", ")
+            FileHandle.standardError.write(Data("WARNING: flags not supported by Apple Containerization runtime (ignored): \(flags)\n".utf8))
+        }
+
         let config = MockerConfig()
         try config.ensureDirectories()
         let engine = try ContainerEngine(config: config)
@@ -375,7 +406,11 @@ struct Run: AsyncParsableCommand {
             stopSignal: stopSignal,
             stopTimeout: stopTimeout,
             memory: memory,
-            cpus: cpus
+            cpus: cpus,
+            cidfile: cidfile,
+            rm: rm,
+            dnsSearch: dnsSearch,
+            dnsOption: dnsOption
         )
 
         let container = try await engine.run(containerConfig)

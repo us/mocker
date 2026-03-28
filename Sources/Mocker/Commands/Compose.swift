@@ -1741,7 +1741,7 @@ struct ComposeVersion: AsyncParsableCommand {
     var short = false
 
     func run() async throws {
-        print("Mocker Compose version v0.1.9")
+        print("Mocker Compose version v\(Version.currentVersion)")
     }
 }
 

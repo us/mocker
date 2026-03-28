@@ -158,17 +158,38 @@ public actor ComposeOrchestrator {
         guard withIP.count > 1 else { return }
 
         for target in withIP {
-            // Build /etc/hosts lines for all *other* services
-            let entries = withIP
-                .filter { $0.serviceName != target.serviceName }
-                .map { "\($0.info.networkAddress) \($0.serviceName)" }
-                .joined(separator: "\n")
+            // Build /etc/hosts entries for all *other* services
+            let otherServices = withIP.filter { $0.serviceName != target.serviceName }
+            guard !otherServices.isEmpty else { continue }
 
-            guard !entries.isEmpty else { continue }
+            // Build args array for safe execution — no shell interpolation
+            // Each entry is passed as a separate argument to avoid injection
+            var hostsContent = ""
+            for svc in otherServices {
+                hostsContent += "\(svc.info.networkAddress) \(svc.serviceName)\n"
+            }
 
-            // Append to /etc/hosts — silently ignore failures (container may not have sh)
-            let cmd = "printf '\\n\(entries)\\n' >> /etc/hosts"
-            try? await engine.exec(target.info.id, command: ["sh", "-c", cmd])
+            // Use tee -a to append to /etc/hosts without shell interpolation
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/local/bin/container")
+            process.arguments = ["exec", "-i", target.info.id, "tee", "-a", "--", "/etc/hosts"]
+            let inputPipe = Pipe()
+            process.standardInput = inputPipe
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            do {
+                try process.run()
+                inputPipe.fileHandleForWriting.write(Data(hostsContent.utf8))
+                inputPipe.fileHandleForWriting.closeFile()
+                // Async-safe: use terminationHandler instead of blocking waitUntilExit
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    process.terminationHandler = { _ in
+                        continuation.resume()
+                    }
+                }
+            } catch {
+                // Silently ignore if container doesn't support exec (e.g. no tee)
+            }
         }
     }
 

@@ -5,7 +5,7 @@ struct MockerCLI: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "mocker",
         abstract: "Docker-compatible container management tool built on Apple Containerization",
-        version: "0.1.0",
+        version: Version.currentVersion,
         subcommands: [
             Run.self,
             Create.self,

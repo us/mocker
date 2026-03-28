@@ -129,7 +129,8 @@ struct Build: AsyncParsableCommand {
         }
         let image = try await manager.build(
             tag: tag, context: context, dockerfile: file, noCache: noCache,
-            buildArgs: buildArg, platform: platform, target: target
+            buildArgs: buildArg, platform: platform, target: target,
+            labels: label, quiet: quiet, progress: progress, output: output
         )
         if quiet {
             print(image.shortID)
