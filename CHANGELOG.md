@@ -5,6 +5,17 @@ All notable changes to Mocker are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0](https://github.com/us/mocker/compare/v0.1.9...v0.2.0) (2026-03-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* Several commands now return explicit errors instead of silently succeeding with no real effect.
+
+### Features
+
+* v0.2.0 "Ground Truth" — honesty layer, security fixes, and tests ([da4b376](https://github.com/us/mocker/commit/da4b3763864ef6d9c5f1b67b8981d4daf919972c))
+
 ## [0.1.9] - 2026-03-14
 
 ### Added
