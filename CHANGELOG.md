@@ -5,6 +5,13 @@ All notable changes to Mocker are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1](https://github.com/us/mocker/compare/v0.2.0...v0.2.1) (2026-04-25)
+
+
+### Features
+
+* add nested virtualization support for run/create ([85362fa](https://github.com/us/mocker/commit/85362fa5599707550a671d07f40a24fe0b1c30a5)), closes [#4](https://github.com/us/mocker/issues/4)
+
 ## [0.2.0] - 2026-03-28
 
 ### Added
