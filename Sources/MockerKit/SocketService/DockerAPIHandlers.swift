@@ -825,12 +825,7 @@ extension DockerAPIHandlers {
             return .error(404, message: "No such container: \(id)")
         }
         if libpod {
-            struct LibpodWait: Encodable, Sendable {
-                struct WaitError: Encodable, Sendable { let Message: String }
-                let Error: WaitError
-                let StatusCode: Int32
-            }
-            return .json(body: LibpodWait(Error: .init(Message: ""), StatusCode: exitCode))
+            return .json(body: exitCode)
         }
         struct WaitResponse: Encodable, Sendable { let StatusCode: Int32 }
         return .json(body: WaitResponse(StatusCode: exitCode))
