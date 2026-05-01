@@ -720,11 +720,9 @@ extension DockerAPIHandlers {
         }
         return HTTPResponse.hijack { fd in
             do {
-                let (stdout, stderr, exitCode) = try await engine.runWithOutputCapture(config)
-                // stderr carries VM startup progress (e.g. [0/6] Fetching image), which
-                // happens before the container command runs, so emit it before stdout.
-                if !stderr.isEmpty { DockerAPIServer.writeDockerFrame(fd: fd, type: 2, data: stderr) }
-                if !stdout.isEmpty { DockerAPIServer.writeDockerFrame(fd: fd, type: 1, data: stdout) }
+                let exitCode = try await engine.runStreaming(config) { type, data in
+                    DockerAPIServer.writeDockerFrame(fd: fd, type: type, data: data)
+                }
                 await runStore.recordExit(id: id, code: exitCode)
             } catch {
                 let msg = Data("\(error)\n".utf8)

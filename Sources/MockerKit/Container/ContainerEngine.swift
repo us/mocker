@@ -43,11 +43,14 @@ public actor ContainerEngine {
 
     // MARK: - Run (attach / output-capture)
 
-    /// Run a container **without** `-d` (detach) and capture its stdout + stderr as raw `Data`.
+    /// Run a container and stream its stdout/stderr to `onOutput` as data arrives.
     ///
-    /// Used by the Docker-socket attach handler so that `docker run` and `podman run`
-    /// can stream the container's output back over the HTTP-101 hijacked connection.
-    public func runWithOutputCapture(_ config: ContainerConfig) async throws -> (stdout: Data, stderr: Data, exitCode: Int32) {
+    /// `onOutput` is called from a serial queue so concurrent stdout/stderr reads
+    /// never race on the caller's write side (e.g. a raw socket fd).
+    public func runStreaming(
+        _ config: ContainerConfig,
+        onOutput: @Sendable @escaping (_ type: UInt8, _ data: Data) -> Void
+    ) async throws -> Int32 {
         var args = ["run"]
         if config.rm { args.append("--rm") }
         args.append(config.image)
@@ -64,33 +67,41 @@ public actor ContainerEngine {
 
         try process.run()
 
-        // Drain both pipes concurrently while the process runs to avoid blocking on a full
-        // pipe buffer (~64 KB), which would otherwise deadlock before the process can exit.
         return await withCheckedContinuation { continuation in
-            // Use a reference type so concurrent closures can write without triggering
-            // Swift's SendableClosureCaptures diagnostic on captured `var`.
-            final class Box: @unchecked Sendable { var data = Data() }
-            let outBox = Box()
-            let errBox = Box()
+            let serial = DispatchQueue(label: "mocker.stream.frame")
             let group = DispatchGroup()
 
-            group.enter()
-            DispatchQueue.global(qos: .userInitiated).async {
-                outBox.data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                group.leave()
+            func drain(handle: FileHandle, type: UInt8) {
+                group.enter()
+                DispatchQueue.global(qos: .userInitiated).async {
+                    while true {
+                        let chunk = handle.availableData
+                        if chunk.isEmpty { break }
+                        serial.sync { onOutput(type, chunk) }
+                    }
+                    group.leave()
+                }
             }
 
-            group.enter()
-            DispatchQueue.global(qos: .userInitiated).async {
-                errBox.data = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-                group.leave()
-            }
+            drain(handle: stdoutPipe.fileHandleForReading, type: 1)
+            drain(handle: stderrPipe.fileHandleForReading, type: 2)
 
             group.notify(queue: .global(qos: .userInitiated)) {
                 process.waitUntilExit()
-                continuation.resume(returning: (stdout: outBox.data, stderr: errBox.data, exitCode: process.terminationStatus))
+                continuation.resume(returning: process.terminationStatus)
             }
         }
+    }
+
+    /// Run a container **without** `-d` (detach) and capture its stdout + stderr as raw `Data`.
+    public func runWithOutputCapture(_ config: ContainerConfig) async throws -> (stdout: Data, stderr: Data, exitCode: Int32) {
+        final class Box: @unchecked Sendable { var data = Data() }
+        let outBox = Box()
+        let errBox = Box()
+        let exitCode = try await runStreaming(config) { type, chunk in
+            if type == 1 { outBox.data.append(chunk) } else { errBox.data.append(chunk) }
+        }
+        return (stdout: outBox.data, stderr: errBox.data, exitCode: exitCode)
     }
 
     // MARK: - Run
