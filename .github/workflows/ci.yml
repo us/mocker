@@ -52,11 +52,23 @@ jobs:
       - name: Wait for Apple container system service
         run: |
           # Wait up to 60 s for the service to become ready
+          ready=0
           for i in $(seq 1 60); do
-            container system status > /dev/null 2>&1 && echo "container system ready" && break
+            if container system status > /dev/null 2>&1; then
+              echo "container system ready (attempt $i)"
+              ready=1
+              break
+            fi
             sleep 1
           done
+          if [ "$ready" -eq 0 ]; then
+            echo "::error::container system did not become ready within 60 s"
+            container system status || true
+            exit 1
+          fi
+          # Status for "is it up?" and version for diagnostics
           container system status
+          container system version
 
       - name: Integration test – socket via curl
         run: |
