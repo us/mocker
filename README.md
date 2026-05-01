@@ -279,6 +279,93 @@ volumes:
   pgdata:
 ```
 
+### Socket Service (Docker / Podman CLI compatibility)
+
+`mocker system service` exposes a Docker-compatible REST API over a Unix socket.
+This lets the **Docker CLI**, **Podman CLI**, or any other Docker-API-speaking tool
+talk to Mocker without any code changes.
+
+#### Start the service
+
+```bash
+# Default socket path: ~/.mocker/mocker.sock
+mocker system service
+
+# Custom socket path
+mocker system service --socket-path /tmp/mocker.sock
+
+# Exit automatically after 60 s of inactivity
+mocker system service --socket-path /tmp/mocker.sock --timeout 60s
+```
+
+#### Use with Docker CLI
+
+```bash
+export DOCKER_HOST="unix://$HOME/.mocker/mocker.sock"
+
+docker version        # shows mocker's API version
+docker ps             # lists containers via mocker
+docker images         # lists images via mocker
+docker run --rm alpine cat /etc/os-release
+```
+
+#### Use with Podman CLI
+
+```bash
+export CONTAINER_HOST="unix://$HOME/.mocker/mocker.sock"
+
+podman version
+podman ps
+podman run --rm alpine cat /etc/os-release
+```
+
+#### Automatic startup via launchd (macOS)
+
+To have the socket service start on login and stay running in the background,
+register it as a launchd user agent. Create
+`~/Library/LaunchAgents/io.mocker.socket.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>io.mocker.socket</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/mocker</string>
+    <string>system</string>
+    <string>service</string>
+  </array>
+  <key>Sockets</key>
+  <dict>
+    <key>MockerSocket</key>
+    <dict>
+      <key>SockFamily</key>
+      <string>Unix</string>
+      <key>SockPathName</key>
+      <string>/Users/YOUR_USERNAME/.mocker/mocker.sock</string>
+    </dict>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+</dict>
+</plist>
+```
+
+Then load it:
+
+```bash
+launchctl load ~/Library/LaunchAgents/io.mocker.socket.plist
+```
+
+When started this way, `mocker system service` automatically picks up the socket
+fd from launchd (socket activation) — no `--socket-path` flag is needed.
+
 ### System
 
 ```bash

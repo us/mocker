@@ -278,6 +278,92 @@ volumes:
   pgdata:
 ```
 
+### Socket 服务（Docker / Podman CLI 兼容）
+
+`mocker system service` 通过 Unix socket 暴露 Docker 兼容的 REST API。
+这使得 **Docker CLI**、**Podman CLI** 或任何支持 Docker API 的工具
+无需修改代码即可与 Mocker 通信。
+
+#### 启动服务
+
+```bash
+# 默认 socket 路径：~/.mocker/mocker.sock
+mocker system service
+
+# 自定义 socket 路径
+mocker system service --socket-path /tmp/mocker.sock
+
+# 60 秒无活动后自动退出
+mocker system service --socket-path /tmp/mocker.sock --timeout 60s
+```
+
+#### 配合 Docker CLI 使用
+
+```bash
+export DOCKER_HOST="unix://$HOME/.mocker/mocker.sock"
+
+docker version        # 显示 mocker 的 API 版本
+docker ps             # 通过 mocker 列出容器
+docker images         # 通过 mocker 列出镜像
+docker run --rm alpine cat /etc/os-release
+```
+
+#### 配合 Podman CLI 使用
+
+```bash
+export CONTAINER_HOST="unix://$HOME/.mocker/mocker.sock"
+
+podman version
+podman ps
+podman run --rm alpine cat /etc/os-release
+```
+
+#### 通过 launchd 自动启动（macOS）
+
+如需在登录时自动启动 socket 服务并在后台保持运行，可将其注册为 launchd 用户代理。
+创建 `~/Library/LaunchAgents/io.mocker.socket.plist`：
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>io.mocker.socket</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/mocker</string>
+    <string>system</string>
+    <string>service</string>
+  </array>
+  <key>Sockets</key>
+  <dict>
+    <key>MockerSocket</key>
+    <dict>
+      <key>SockFamily</key>
+      <string>Unix</string>
+      <key>SockPathName</key>
+      <string>/Users/YOUR_USERNAME/.mocker/mocker.sock</string>
+    </dict>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+</dict>
+</plist>
+```
+
+然后加载：
+
+```bash
+launchctl load ~/Library/LaunchAgents/io.mocker.socket.plist
+```
+
+通过此方式启动时，`mocker system service` 会自动从 launchd 获取 socket 文件描述符
+（socket 激活），无需 `--socket-path` 参数。
+
 ### 系统管理
 
 ```bash
