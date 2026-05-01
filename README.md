@@ -350,9 +350,7 @@ register it as a launchd user agent. Create
     </dict>
   </dict>
   <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
+  <false/>
 </dict>
 </plist>
 ```

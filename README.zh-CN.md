@@ -348,9 +348,7 @@ podman run --rm alpine cat /etc/os-release
     </dict>
   </dict>
   <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
+  <false/>
 </dict>
 </plist>
 ```

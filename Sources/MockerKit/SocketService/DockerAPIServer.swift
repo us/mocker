@@ -170,12 +170,26 @@ actor PendingRunStore {
         waiters.forEach { $0.resume(returning: code) }
     }
 
-    func waitForExit(id: String) async -> Int32 {
-        if let e = entries[id], e.exited { return e.exitCode }
-        return await withCheckedContinuation { entries[id]?.waiters.append($0) }
+    func waitForExit(id: String) async -> Int32? {
+        if let e = entries[id] {
+            if e.exited { return e.exitCode }
+            return await withCheckedContinuation { continuation in
+                guard var entry = entries[id] else {
+                    continuation.resume(returning: 0)
+                    return
+                }
+                entry.waiters.append(continuation)
+                entries[id] = entry
+            }
+        }
+        return nil
     }
 
-    func remove(id: String) { entries.removeValue(forKey: id) }
+    func remove(id: String) {
+        guard let entry = entries.removeValue(forKey: id) else { return }
+        let code = entry.exitCode
+        entry.waiters.forEach { $0.resume(returning: code) }
+    }
 }
 
 // MARK: - Docker API Server
@@ -314,15 +328,15 @@ public actor DockerAPIServer {
 
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
-        guard path.utf8.count < MemoryLayout.size(ofValue: addr.sun_path) else {
+        let sunPathCapacity = MemoryLayout.size(ofValue: addr.sun_path)
+        guard path.utf8.count < sunPathCapacity else {
             close(fd)
             throw MockerError.operationFailed("Socket path too long: \(path)")
         }
         path.withCString { cStr in
             withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
-                // 104 = sizeof(sockaddr_un.sun_path) on macOS/Linux; leave room for NUL terminator (103 chars max).
-                ptr.withMemoryRebound(to: CChar.self, capacity: 104) { dest in
-                    _ = strncpy(dest, cStr, 103)
+                ptr.withMemoryRebound(to: CChar.self, capacity: sunPathCapacity) { dest in
+                    _ = strncpy(dest, cStr, sunPathCapacity - 1)
                 }
             }
         }

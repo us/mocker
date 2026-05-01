@@ -738,7 +738,9 @@ extension DockerAPIHandlers {
         id: String,
         libpod: Bool = false
     ) async -> HTTPResponse {
-        let exitCode = await runStore.waitForExit(id: id)
+        guard let exitCode = await runStore.waitForExit(id: id) else {
+            return .error(404, message: "No such container: \(id)")
+        }
         if libpod {
             struct LibpodWait: Encodable, Sendable {
                 struct WaitError: Encodable, Sendable { let Message: String }

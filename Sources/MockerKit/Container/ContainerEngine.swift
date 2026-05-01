@@ -64,12 +64,31 @@ public actor ContainerEngine {
 
         try process.run()
 
-        // Read both pipes serially inside terminationHandler (after process exit, no concurrency issue).
+        // Drain both pipes concurrently while the process runs to avoid blocking on a full
+        // pipe buffer (~64 KB), which would otherwise deadlock before the process can exit.
         return await withCheckedContinuation { continuation in
-            process.terminationHandler = { p in
-                let outData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-                continuation.resume(returning: (stdout: outData, stderr: errData, exitCode: p.terminationStatus))
+            // Use a reference type so concurrent closures can write without triggering
+            // Swift's SendableClosureCaptures diagnostic on captured `var`.
+            final class Box: @unchecked Sendable { var data = Data() }
+            let outBox = Box()
+            let errBox = Box()
+            let group = DispatchGroup()
+
+            group.enter()
+            DispatchQueue.global(qos: .userInitiated).async {
+                outBox.data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+                group.leave()
+            }
+
+            group.enter()
+            DispatchQueue.global(qos: .userInitiated).async {
+                errBox.data = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                group.leave()
+            }
+
+            group.notify(queue: .global(qos: .userInitiated)) {
+                process.waitUntilExit()
+                continuation.resume(returning: (stdout: outBox.data, stderr: errBox.data, exitCode: process.terminationStatus))
             }
         }
     }
