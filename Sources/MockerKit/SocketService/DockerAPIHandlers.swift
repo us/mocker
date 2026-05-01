@@ -212,7 +212,8 @@ enum DockerAPIHandlers {
     static func route(
         request: HTTPRequest,
         engine: ContainerEngine,
-        imageManager: ImageManager
+        imageManager: ImageManager,
+        runStore: PendingRunStore
     ) async -> HTTPResponse {
         let path = request.strippedPath
         let method = request.method
@@ -242,8 +243,11 @@ enum DockerAPIHandlers {
         }
 
         if method == "POST" && path == "/containers/create" {
-            let name = request.queryItems["name"]
-            return await createContainer(engine: engine, name: name, body: request.body)
+            return await pendingCreate(
+                runStore: runStore,
+                name: request.queryItems["name"],
+                body: request.body
+            )
         }
 
         if method == "GET" && path.hasPrefix("/containers/") && path.hasSuffix("/json") {
@@ -251,8 +255,15 @@ enum DockerAPIHandlers {
             return await inspectContainer(engine: engine, id: id)
         }
 
+        if method == "POST" && path.hasPrefix("/containers/") && path.hasSuffix("/attach") {
+            let id = midSegment(path, prefix: "/containers/", suffix: "/attach")
+            return await attachContainer(engine: engine, runStore: runStore, id: id)
+        }
+
         if method == "POST" && path.hasPrefix("/containers/") && path.hasSuffix("/start") {
             let id = midSegment(path, prefix: "/containers/", suffix: "/start")
+            // Pending containers are started by the attach handler
+            if await runStore.getConfig(id: id) != nil { return .noContent() }
             return await startContainer(engine: engine, id: id)
         }
 
@@ -261,8 +272,18 @@ enum DockerAPIHandlers {
             return await stopContainer(engine: engine, id: id)
         }
 
+        if method == "POST" && path.hasPrefix("/containers/") && path.hasSuffix("/wait") {
+            let id = midSegment(path, prefix: "/containers/", suffix: "/wait")
+            return await waitContainer(runStore: runStore, id: id)
+        }
+
         if method == "DELETE" && path.hasPrefix("/containers/") {
             let id = String(path.dropFirst("/containers/".count))
+            // Remove pending containers; delegate real containers to the engine
+            if await runStore.getConfig(id: id) != nil {
+                await runStore.remove(id: id)
+                return .noContent()
+            }
             let force = request.queryItems["force"].map { $0 == "1" || $0 == "true" } ?? false
             return await removeContainer(engine: engine, id: id, force: force)
         }
@@ -285,10 +306,11 @@ enum DockerAPIHandlers {
             return await inspectImage(imageManager: imageManager, name: name)
         }
 
-        // Podman libpod API – minimal subset so `podman version` and `podman ps` work
+        // Podman libpod API – subset so `podman version`, `podman ps`, and `podman run` work
         // when CONTAINER_HOST points at the mocker socket.
         if path.hasPrefix("/libpod/") {
             let subpath = String(path.dropFirst("/libpod".count)) // "/libpod/foo" → "/foo"
+
             if method == "GET" && (subpath == "/_ping" || subpath == "/ping") {
                 return .text(200, body: "OK")
             }
@@ -305,8 +327,47 @@ enum DockerAPIHandlers {
                 let all = request.queryItems["all"].map { $0 == "1" || $0 == "true" } ?? false
                 return await listContainers(engine: engine, all: all)
             }
+            if method == "POST" && subpath == "/containers/create" {
+                return await pendingCreate(
+                    runStore: runStore,
+                    name: request.queryItems["name"],
+                    body: request.body,
+                    libpod: true
+                )
+            }
+            if method == "POST" && subpath.hasPrefix("/containers/") && subpath.hasSuffix("/attach") {
+                let id = midSegment(subpath, prefix: "/containers/", suffix: "/attach")
+                return await attachContainer(engine: engine, runStore: runStore, id: id)
+            }
+            if method == "POST" && subpath.hasPrefix("/containers/") && subpath.hasSuffix("/start") {
+                let id = midSegment(subpath, prefix: "/containers/", suffix: "/start")
+                if await runStore.getConfig(id: id) != nil { return .noContent() }
+                return await startContainer(engine: engine, id: id)
+            }
+            if method == "POST" && subpath.hasPrefix("/containers/") && subpath.hasSuffix("/wait") {
+                let id = midSegment(subpath, prefix: "/containers/", suffix: "/wait")
+                return await waitContainer(runStore: runStore, id: id, libpod: true)
+            }
+            if method == "DELETE" && subpath.hasPrefix("/containers/") {
+                let id = String(subpath.dropFirst("/containers/".count))
+                if await runStore.getConfig(id: id) != nil {
+                    await runStore.remove(id: id)
+                    return .noContent()
+                }
+                let force = request.queryItems["force"].map { $0 == "1" || $0 == "true" } ?? false
+                return await removeContainer(engine: engine, id: id, force: force)
+            }
             if method == "GET" && subpath == "/images/json" {
                 return await listImages(imageManager: imageManager)
+            }
+            if method == "POST" && subpath == "/images/pull" {
+                let ref = request.queryItems["reference"] ?? ""
+                return await pullImage(imageManager: imageManager, reference: ref)
+            }
+            if method == "GET" && subpath.hasPrefix("/images/") && subpath.hasSuffix("/json") {
+                let name = midSegment(subpath, prefix: "/images/", suffix: "/json")
+                    .removingPercentEncoding ?? ""
+                return await inspectImage(imageManager: imageManager, name: name)
             }
             return .error(404, message: "libpod endpoint not implemented: \(path)")
         }
@@ -526,65 +587,6 @@ extension DockerAPIHandlers {
         }
     }
 
-    static func createContainer(engine: ContainerEngine, name: String?, body: Data) async -> HTTPResponse {
-        guard let decoded = try? JSONDecoder().decode(DockerContainerCreateBody.self, from: body) else {
-            return .error(400, message: "invalid JSON body")
-        }
-
-        var env: [String: String] = [:]
-        for e in decoded.Env ?? [] {
-            let parts = e.split(separator: "=", maxSplits: 1)
-            if parts.count == 2 { env[String(parts[0])] = String(parts[1]) }
-        }
-
-        var ports: [PortMapping] = []
-        for (containerPort, bindings) in decoded.HostConfig?.PortBindings ?? [:] {
-            for binding in bindings {
-                let proto: PortProtocol = containerPort.hasSuffix("/udp") ? .udp : .tcp
-                let cPort = UInt16(containerPort.split(separator: "/").first ?? "") ?? 0
-                let hPort = UInt16(binding.HostPort) ?? 0
-                ports.append(PortMapping(hostPort: hPort, containerPort: cPort, portProtocol: proto))
-            }
-        }
-
-        var volumes: [VolumeMount] = []
-        for bind in decoded.HostConfig?.Binds ?? [] {
-            let parts = bind.split(separator: ":").map(String.init)
-            if parts.count >= 2 {
-                let ro = parts.count >= 3 && parts[2] == "ro"
-                volumes.append(VolumeMount(source: parts[0], destination: parts[1], readOnly: ro))
-            }
-        }
-
-        var config = ContainerConfig(
-            name: name,
-            image: decoded.Image,
-            command: decoded.Cmd ?? [],
-            environment: env,
-            ports: ports,
-            volumes: volumes,
-            labels: decoded.Labels ?? [:]
-        )
-        if let wd = decoded.WorkingDir { config.workingDir = wd }
-        if let user = decoded.User { config.user = user }
-        if let ep = decoded.Entrypoint { config.entrypoint = ep.first }
-
-        do {
-            let c = try await engine.run(config)
-            struct CreateResponse: Encodable, Sendable {
-                let Id: String
-                let Warnings: [String]
-            }
-            return .json(201, body: CreateResponse(Id: c.id, Warnings: []))
-        } catch let err as MockerError {
-            if case .containerAlreadyExists = err {
-                return .error(409, message: err.localizedDescription)
-            }
-            return .error(500, message: err.localizedDescription)
-        } catch {
-            return .error(500, message: "\(error)")
-        }
-    }
 
     static func listImages(imageManager: ImageManager) async -> HTTPResponse {
         let images = (try? await imageManager.list()) ?? []
@@ -659,5 +661,127 @@ extension DockerAPIHandlers {
         } catch {
             return .error(500, message: "\(error)")
         }
+    }
+
+    // MARK: - Pending-run create / attach / wait
+
+    /// `POST /containers/create` (Docker) and `POST /libpod/containers/create` (Podman).
+    ///
+    /// Stores the container config in `PendingRunStore` and returns a synthetic container ID.
+    /// The container is not actually started until `POST /containers/{id}/attach` is received.
+    static func pendingCreate(
+        runStore: PendingRunStore,
+        name: String?,
+        body: Data,
+        libpod: Bool = false
+    ) async -> HTTPResponse {
+        let image: String
+        let cmd: [String]
+        let rm: Bool
+
+        if libpod {
+            struct LibpodCreate: Decodable, Sendable {
+                let image: String
+                let command: [String]?
+                let remove: Bool?
+                let name: String?
+            }
+            guard let decoded = try? JSONDecoder().decode(LibpodCreate.self, from: body) else {
+                return .error(400, message: "invalid JSON body")
+            }
+            image = decoded.image
+            cmd = decoded.command ?? []
+            rm = decoded.remove ?? false
+        } else {
+            guard let decoded = try? JSONDecoder().decode(DockerContainerCreateBody.self, from: body) else {
+                return .error(400, message: "invalid JSON body")
+            }
+            image = decoded.Image
+            cmd = decoded.Cmd ?? []
+            rm = false
+        }
+
+        var config = ContainerConfig(name: name, image: image, command: cmd)
+        config.rm = rm
+
+        let id = await runStore.create(config: config)
+        struct CreateResponse: Encodable, Sendable { let Id: String; let Warnings: [String] }
+        return .json(201, body: CreateResponse(Id: id, Warnings: []))
+    }
+
+    /// `POST /containers/{id}/attach` — HTTP 101 hijack, runs the container, streams output.
+    static func attachContainer(
+        engine: ContainerEngine,
+        runStore: PendingRunStore,
+        id: String
+    ) async -> HTTPResponse {
+        guard let config = await runStore.getConfig(id: id) else {
+            return .error(404, message: "No such container: \(id)")
+        }
+        return HTTPResponse.hijack { fd in
+            do {
+                let (stdout, stderr, exitCode) = try await engine.runWithOutputCapture(config)
+                if !stdout.isEmpty { DockerAPIServer.writeDockerFrame(fd: fd, type: 1, data: stdout) }
+                if !stderr.isEmpty { DockerAPIServer.writeDockerFrame(fd: fd, type: 2, data: stderr) }
+                await runStore.recordExit(id: id, code: exitCode)
+            } catch {
+                let msg = Data("\(error)\n".utf8)
+                DockerAPIServer.writeDockerFrame(fd: fd, type: 2, data: msg)
+                await runStore.recordExit(id: id, code: 1)
+            }
+        }
+    }
+
+    /// `POST /containers/{id}/wait` — blocks until the container exits, returns its exit code.
+    static func waitContainer(
+        runStore: PendingRunStore,
+        id: String,
+        libpod: Bool = false
+    ) async -> HTTPResponse {
+        let exitCode = await runStore.waitForExit(id: id)
+        if libpod {
+            struct LibpodWait: Encodable, Sendable {
+                struct WaitError: Encodable, Sendable { let Message: String }
+                let Error: WaitError
+                let StatusCode: Int32
+            }
+            return .json(body: LibpodWait(Error: .init(Message: ""), StatusCode: exitCode))
+        }
+        struct WaitResponse: Encodable, Sendable { let StatusCode: Int32 }
+        return .json(body: WaitResponse(StatusCode: exitCode))
+    }
+}
+
+// MARK: - libpod version response
+
+extension DockerAPIHandlers {
+    static func libpodVersionResponse() -> HTTPResponse {
+        struct LibpodVersionInfo: Encodable, Sendable {
+            let APIVersion: String
+            let Arch: String
+            let BuildTime: String
+            let GitCommit: String
+            let GoVersion: String
+            let MinAPIVersion: String
+            let Os: String
+            let Version: String
+        }
+        let arch: String = {
+            #if arch(arm64)
+            return "arm64"
+            #else
+            return "amd64"
+            #endif
+        }()
+        return .json(body: LibpodVersionInfo(
+            APIVersion: "5.0.0",
+            Arch: arch,
+            BuildTime: "",
+            GitCommit: "",
+            GoVersion: "",
+            MinAPIVersion: "4.0.0",
+            Os: "linux",
+            Version: MockerConfig.mockerVersion
+        ))
     }
 }

@@ -41,6 +41,53 @@ public actor ContainerEngine {
         )
     }
 
+    // MARK: - Run (attach / output-capture)
+
+    /// Run a container **without** `-d` (detach) and capture its stdout + stderr as raw `Data`.
+    ///
+    /// Used by the Docker-socket attach handler so that `docker run` and `podman run`
+    /// can stream the container's output back over the HTTP-101 hijacked connection.
+    public func runWithOutputCapture(_ config: ContainerConfig) async throws -> (stdout: Data, stderr: Data, exitCode: Int32) {
+        var args = ["run"]
+        if config.rm { args.append("--rm") }
+        args.append(config.image)
+        args += config.command
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: Self.containerCLI)
+        process.arguments = args
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        try process.run()
+
+        return await withCheckedContinuation { continuation in
+            let group = DispatchGroup()
+            var outData = Data()
+            var errData = Data()
+
+            group.enter()
+            DispatchQueue.global().async {
+                outData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+                group.leave()
+            }
+            group.enter()
+            DispatchQueue.global().async {
+                errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                group.leave()
+            }
+
+            process.terminationHandler = { p in
+                group.notify(queue: .global()) {
+                    continuation.resume(returning: (stdout: outData, stderr: errData, exitCode: p.terminationStatus))
+                }
+            }
+        }
+    }
+
     // MARK: - Run
 
     public func run(_ containerConfig: ContainerConfig) async throws -> ContainerInfo {

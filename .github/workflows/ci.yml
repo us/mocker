@@ -66,7 +66,7 @@ jobs:
       - name: Integration test – Docker CLI
         run: |
           SOCK=/tmp/mocker-ci-docker.sock
-          .build/release/mocker system service --socket-path "$SOCK" --timeout 60s &
+          .build/release/mocker system service --socket-path "$SOCK" --timeout 120s &
           SERVICE_PID=$!
 
           for i in $(seq 1 30); do
@@ -82,13 +82,15 @@ jobs:
           docker ps
           docker images
 
+          echo "docker run alpine cat /etc/os-release:"
+          docker run --rm alpine cat /etc/os-release
           echo "Docker CLI: OK"
           kill $SERVICE_PID 2>/dev/null || true
 
       - name: Integration test – Podman CLI
         run: |
           SOCK=/tmp/mocker-ci-podman.sock
-          .build/release/mocker system service --socket-path "$SOCK" --timeout 60s &
+          .build/release/mocker system service --socket-path "$SOCK" --timeout 120s &
           SERVICE_PID=$!
 
           for i in $(seq 1 30); do
@@ -99,10 +101,12 @@ jobs:
           curl -sf --unix-socket "$SOCK" http://localhost/_ping > /dev/null \
             || { echo "::error::socket not ready"; kill $SERVICE_PID 2>/dev/null || true; exit 1; }
 
-          # Set DOCKER_HOST so podman uses the Docker-compat API (not the libpod API)
-          export DOCKER_HOST="unix://$SOCK"
+          # Use CONTAINER_HOST so podman talks libpod API to our mocker socket
+          export CONTAINER_HOST="unix://$SOCK"
           podman version
           podman ps
 
+          echo "podman run alpine cat /etc/os-release:"
+          podman run --rm alpine cat /etc/os-release
           echo "Podman CLI: OK"
           kill $SERVICE_PID 2>/dev/null || true

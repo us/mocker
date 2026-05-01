@@ -36,6 +36,39 @@ struct HTTPResponse: Sendable {
     let statusText: String
     let headers: [String: String]
     let body: Data
+    /// When non-nil the server writes the response header, then calls this with the raw
+    /// client fd (HTTP 101 / Docker container-attach hijack).
+    let streamHandler: (@Sendable (Int32) async -> Void)?
+
+    init(
+        status: Int,
+        statusText: String,
+        headers: [String: String] = [:],
+        body: Data = Data(),
+        streamHandler: (@Sendable (Int32) async -> Void)? = nil
+    ) {
+        self.status = status
+        self.statusText = statusText
+        self.headers = headers
+        self.body = body
+        self.streamHandler = streamHandler
+    }
+
+    /// HTTP 101 response that hands off the raw fd to `handler`.
+    /// Used for Docker container-attach: server writes the upgrade header then
+    /// streams container output in Docker multiplexed-stream format.
+    static func hijack(_ handler: @escaping @Sendable (Int32) async -> Void) -> HTTPResponse {
+        HTTPResponse(
+            status: 101,
+            statusText: "UPGRADED",
+            headers: [
+                "Content-Type": "application/vnd.docker.raw-stream",
+                "Connection": "Upgrade",
+                "Upgrade": "tcp",
+            ],
+            streamHandler: handler
+        )
+    }
 
     static func json(_ status: Int = 200, body: some Encodable & Sendable) -> HTTPResponse {
         let encoder = JSONEncoder()
@@ -101,6 +134,50 @@ struct HTTPResponse: Sendable {
     }
 }
 
+// MARK: - Pending Run Store
+
+/// Coordinates the Docker/Podman create → attach → start → wait lifecycle.
+///
+/// `POST /containers/create` stores a `ContainerConfig` here.
+/// `POST /containers/{id}/attach` runs the container and streams output.
+/// `POST /containers/{id}/start`  is a no-op (attach already started it).
+/// `POST /containers/{id}/wait`   blocks until attach records the exit code.
+actor PendingRunStore {
+    struct Entry {
+        let config: ContainerConfig
+        var exited = false
+        var exitCode: Int32 = 0
+        var waiters: [CheckedContinuation<Int32, Never>] = []
+    }
+
+    private var entries: [String: Entry] = [:]
+
+    func create(config: ContainerConfig) -> String {
+        let id = UUID().uuidString.lowercased().replacingOccurrences(of: "-", with: "")
+        entries[id] = Entry(config: config)
+        return id
+    }
+
+    func getConfig(id: String) -> ContainerConfig? { entries[id]?.config }
+
+    func recordExit(id: String, code: Int32) {
+        guard var e = entries[id] else { return }
+        e.exited = true
+        e.exitCode = code
+        let waiters = e.waiters
+        e.waiters = []
+        entries[id] = e
+        waiters.forEach { $0.resume(returning: code) }
+    }
+
+    func waitForExit(id: String) async -> Int32 {
+        if let e = entries[id], e.exited { return e.exitCode }
+        return await withCheckedContinuation { entries[id]?.waiters.append($0) }
+    }
+
+    func remove(id: String) { entries.removeValue(forKey: id) }
+}
+
 // MARK: - Docker API Server
 
 /// Serves the Docker Engine REST API over a Unix-domain socket.
@@ -115,6 +192,7 @@ struct HTTPResponse: Sendable {
 public actor DockerAPIServer {
     public nonisolated let containerEngine: ContainerEngine
     public nonisolated let imageManager: ImageManager
+    let runStore = PendingRunStore()
 
     private var lastActivity: Date = Date()
     private var activeConnections: Int = 0
@@ -179,6 +257,7 @@ public actor DockerAPIServer {
     private func runAcceptLoop(serverFd: Int32) async throws {
         let engine = containerEngine
         let imgMgr = imageManager
+        let store = runStore
         while true {
             let clientFd = try await Self.acceptAsync(serverFd)
             incrementConnections()
@@ -187,7 +266,8 @@ public actor DockerAPIServer {
                 await Self.handleConnection(
                     clientFd: clientFd,
                     engine: engine,
-                    imageManager: imgMgr
+                    imageManager: imgMgr,
+                    runStore: store
                 )
                 close(clientFd)
                 await server.decrementConnections()
@@ -200,15 +280,20 @@ public actor DockerAPIServer {
     private static func handleConnection(
         clientFd: Int32,
         engine: ContainerEngine,
-        imageManager: ImageManager
+        imageManager: ImageManager,
+        runStore: PendingRunStore
     ) async {
         guard let request = await readHTTPRequest(fd: clientFd) else { return }
         let response = await DockerAPIHandlers.route(
             request: request,
             engine: engine,
-            imageManager: imageManager
+            imageManager: imageManager,
+            runStore: runStore
         )
         writeHTTPResponse(fd: clientFd, response: response)
+        if let handler = response.streamHandler {
+            await handler(clientFd)
+        }
     }
 
     // MARK: - Socket Helpers
@@ -394,9 +479,39 @@ public actor DockerAPIServer {
             }
         }
     }
+    // MARK: - Docker Multiplexed-Stream Frame
+
+    /// Write one Docker multiplexed-stream frame directly to a raw fd.
+    ///
+    /// Frame layout: `[type(1)] [0,0,0] [payloadSize(4 BE)] [payload]`
+    ///
+    /// - Parameters:
+    ///   - fd:   Raw client file descriptor from the accept loop.
+    ///   - type: `1` = stdout, `2` = stderr.
+    ///   - data: Payload bytes to include in this frame.
+    static func writeDockerFrame(fd: Int32, type: UInt8, data: Data) {
+        guard !data.isEmpty else { return }
+        var frame = Data(repeating: 0, count: 8)
+        frame[0] = type
+        let size = UInt32(data.count)
+        frame[4] = UInt8((size >> 24) & 0xFF)
+        frame[5] = UInt8((size >> 16) & 0xFF)
+        frame[6] = UInt8((size >> 8) & 0xFF)
+        frame[7] = UInt8(size & 0xFF)
+        var out = frame
+        out.append(data)
+        out.withUnsafeBytes { raw in
+            guard let ptr = raw.baseAddress else { return }
+            var sent = 0
+            while sent < out.count {
+                let n = send(fd, ptr.advanced(by: sent), out.count - sent, 0)
+                guard n > 0 else { break }
+                sent += n
+            }
+        }
+    }
 }
 
-// MARK: - launchd Socket Activation
 
 /// Attempt to acquire a socket fd previously bound by launchd.
 ///
