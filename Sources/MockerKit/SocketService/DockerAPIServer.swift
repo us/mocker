@@ -81,6 +81,7 @@ struct HTTPResponse: Sendable {
                 "Content-Type": "application/json",
                 "Content-Length": "\(data.count)",
                 "Api-Version": DockerAPIServer.apiVersion,
+                "Libpod-API-Version": "5.0.0",
                 "Server": "mocker/\(MockerConfig.mockerVersion)",
             ],
             body: data
@@ -96,6 +97,7 @@ struct HTTPResponse: Sendable {
                 "Content-Type": "text/plain; charset=utf-8",
                 "Content-Length": "\(data.count)",
                 "Api-Version": DockerAPIServer.apiVersion,
+                "Libpod-API-Version": "5.0.0",
                 "Server": "mocker/\(MockerConfig.mockerVersion)",
             ],
             body: data
