@@ -37,6 +37,11 @@ Your existing `docker-compose.yml` works as-is.
 
 ## What's New
 
+### v0.2.2 — Multi-arch builds & exotic-arch hints
+- **`mocker build --platform linux/arm64,linux/amd64,linux/ppc64le -t myimage .`** — multi-arch manifest build via Podman machine (all arches, one command)
+- Exotic-arch warning: `mocker build --platform linux/ppc64le` now prints an actionable hint before and after failure instead of a bare exit-code error
+- Podman machine is auto-detected; missing machine prints step-by-step recovery instructions
+
 ### v0.2.1 — Nested virtualization
 - **`--virtualization` / `--kernel`** for `mocker run` and `mocker create` — expose nested virtualization to containers (closes #4)
 
@@ -182,35 +187,63 @@ mocker push my-registry.io/myapp:latest
 
 #### Architecture support for builds
 
-| Architecture | `mocker build` | `mocker run` | Notes |
-|---|:---:|:---:|---|
-| `linux/arm64` | ✅ | ✅ | Native — Apple Silicon |
-| `linux/amd64` | ✅ | ✅ | Via Rosetta 2 hardware translation |
-| `linux/ppc64le` | ⚠️ | ❌ | Build works if no `RUN` steps; `RUN` fails (Exec format error) |
-| `linux/s390x` | ⚠️ | ❌ | Same limitation as ppc64le |
-| `linux/riscv64` | ⚠️ | ❌ | Same limitation |
+| Architecture | `mocker build` (single) | `mocker build` (multi-arch) | `mocker run` | Notes |
+|---|:---:|:---:|:---:|---|
+| `linux/arm64` | ✅ | ✅ | ✅ | Native — Apple Silicon |
+| `linux/amd64` | ✅ | ✅ | ✅ | Via Rosetta 2 hardware translation |
+| `linux/ppc64le` | ⚠️ | ✅* | ❌ | Single: `RUN` fails; Multi: via Podman machine QEMU |
+| `linux/s390x` | ⚠️ | ✅* | ❌ | Same as ppc64le |
+| `linux/riscv64` | ⚠️ | ✅* | ❌ | Same as ppc64le |
+
+\* Multi-arch builds for exotic arches require a running Podman machine (`podman machine start`).
 
 `linux/amd64` works seamlessly because Apple Silicon includes Rosetta 2 — hardware x86 translation. For other non-native architectures (ppc64le, s390x, riscv64), Dockerfiles with only `FROM`/`COPY`/`CMD` steps build successfully (layers are repackaged from the multi-arch base image), but any `RUN` instruction fails with `Exec format error` because Apple's build VM has no QEMU user-mode emulation for those ISAs.
 
 For comparison, Podman machine on macOS handles ppc64le/s390x `RUN` steps via QEMU inside its Fedora CoreOS VM — at the cost of a persistent shared VM.
 
-**Workarounds for exotic-arch `RUN` steps:**
+#### Multi-arch manifest builds
+
+`mocker build` accepts a comma-separated `--platform` list. When multiple platforms are specified, it builds each arch via Podman (which includes QEMU in its Fedora CoreOS VM) and assembles an OCI manifest list with `podman manifest create`:
 
 ```bash
-# Option 1: Remote builder (Linux box with QEMU binfmt)
+# Build a multi-arch manifest image (arm64 + amd64 + ppc64le)
+# Requires: podman machine start
+mocker build \
+  --platform linux/arm64,linux/amd64,linux/ppc64le \
+  -t myimage:latest \
+  .
+
+# Resulting images:
+#   myimage:latest-arm64   (linux/arm64)
+#   myimage:latest-amd64   (linux/amd64)
+#   myimage:latest-ppc64le (linux/ppc64le)
+#   myimage:latest         (manifest list → all three)
+```
+
+For single exotic-arch builds, mocker prints a warning with actionable hints before attempting the build.
+
+**Workarounds for exotic-arch `RUN` steps (single-arch):**
+
+```bash
+# Option 1: mocker multi-arch build (Podman machine required)
+podman machine start
+mocker build --platform linux/arm64,linux/ppc64le -t myimage .
+
+# Option 2: Podman directly
+podman machine start
+podman build --platform linux/ppc64le -t myimage:ppc64le .
+
+# Option 3: Remote builder (Linux box with QEMU binfmt)
 docker buildx create --driver docker-container \
   --platform linux/ppc64le,linux/s390x \
   ssh://user@your-linux-box
 docker buildx build --platform linux/ppc64le -t myimage:ppc64le .
 
-# Option 2: GitHub Actions (zero infrastructure)
+# Option 4: GitHub Actions (zero infrastructure)
 # Use docker/setup-qemu-action + docker/setup-buildx-action in CI
-
-# Option 3: Reuse a running Podman machine (already has QEMU)
-# See us/mocker#10 for tracking native support
 ```
 
-> **Tracking:** exotic-arch build support is tracked in [us/mocker#10](https://github.com/us/mocker/issues/10) and upstream in [apple/container#1496](https://github.com/apple/container/issues/1496).
+> **Tracking:** exotic-arch build support is tracked in [us/mocker#10](https://github.com/us/mocker/issues/10) and upstream in [apple/container#1496](https://github.com/apple/container/issues/1496). Manifest assembly workarounds (without Apple `container manifest`) are tracked in [us/mocker#11](https://github.com/us/mocker/issues/11).
 
 ### Inspect & Stats
 

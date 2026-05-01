@@ -37,6 +37,11 @@ mocker exec -it my-app sh
 
 ## 最新更新
 
+### v0.2.2 — 多架构构建 & 异构架构提示
+- **`mocker build --platform linux/arm64,linux/amd64,linux/ppc64le -t myimage .`** — 通过 Podman machine 实现多架构 manifest 构建（一条命令，所有架构）
+- 异构架构警告：`mocker build --platform linux/ppc64le` 现在在失败前后打印可操作的提示，而非仅输出退出码错误
+- 自动检测 Podman machine 是否运行；未运行时输出分步恢复说明
+
 ### v0.2.1 — 嵌套虚拟化
 - **`--virtualization` / `--kernel`** 适用于 `mocker run` 和 `mocker create` — 向容器暴露嵌套虚拟化能力（closes #4）
 
@@ -181,35 +186,63 @@ mocker push my-registry.io/myapp:latest
 
 #### 构建架构支持情况
 
-| 架构 | `mocker build` | `mocker run` | 说明 |
-|---|:---:|:---:|---|
-| `linux/arm64` | ✅ | ✅ | 原生 — Apple Silicon |
-| `linux/amd64` | ✅ | ✅ | 通过 Rosetta 2 硬件转译 |
-| `linux/ppc64le` | ⚠️ | ❌ | 无 `RUN` 步骤时可构建；`RUN` 会报 Exec format error |
-| `linux/s390x` | ⚠️ | ❌ | 与 ppc64le 限制相同 |
-| `linux/riscv64` | ⚠️ | ❌ | 与 ppc64le 限制相同 |
+| 架构 | `mocker build`（单架构） | `mocker build`（多架构） | `mocker run` | 说明 |
+|---|:---:|:---:|:---:|---|
+| `linux/arm64` | ✅ | ✅ | ✅ | 原生 — Apple Silicon |
+| `linux/amd64` | ✅ | ✅ | ✅ | 通过 Rosetta 2 硬件转译 |
+| `linux/ppc64le` | ⚠️ | ✅* | ❌ | 单架构：`RUN` 失败；多架构：通过 Podman machine QEMU |
+| `linux/s390x` | ⚠️ | ✅* | ❌ | 与 ppc64le 相同 |
+| `linux/riscv64` | ⚠️ | ✅* | ❌ | 与 ppc64le 相同 |
+
+\* 异构架构的多架构构建需要运行中的 Podman machine（`podman machine start`）。
 
 `linux/amd64` 之所以无缝支持，是因为 Apple Silicon 内置了 Rosetta 2（x86 硬件转译）。对于其他非原生架构（ppc64le、s390x、riscv64），仅含 `FROM`/`COPY`/`CMD` 的 Dockerfile 可以成功构建（直接复用多架构基础镜像的对应层），但任何 `RUN` 指令都会因 Apple 构建 VM 未注册 QEMU 用户态模拟而报 `Exec format error`。
 
 作为对比，macOS 上的 Podman machine 可通过其 Fedora CoreOS VM 内置的 QEMU 处理 ppc64le/s390x 的 `RUN` 步骤——代价是需要维护一个持久的共享虚拟机。
 
-**针对异构架构 `RUN` 步骤的替代方案：**
+#### 多架构 Manifest 构建
+
+`mocker build` 支持逗号分隔的 `--platform` 列表。指定多个平台时，将通过 Podman（其 Fedora CoreOS VM 内含 QEMU）分别构建每个架构，并使用 `podman manifest create` 组装 OCI manifest list：
 
 ```bash
-# 方案一：远程构建器（配置了 QEMU binfmt 的 Linux 机器）
+# 构建多架构 manifest 镜像（arm64 + amd64 + ppc64le）
+# 前提：podman machine start
+mocker build \
+  --platform linux/arm64,linux/amd64,linux/ppc64le \
+  -t myimage:latest \
+  .
+
+# 构建结果：
+#   myimage:latest-arm64   (linux/arm64)
+#   myimage:latest-amd64   (linux/amd64)
+#   myimage:latest-ppc64le (linux/ppc64le)
+#   myimage:latest         (manifest list → 包含以上三个)
+```
+
+对于单架构的异构平台构建，mocker 会在尝试构建前后输出带有可操作建议的警告信息。
+
+**针对异构架构 `RUN` 步骤的替代方案（单架构）：**
+
+```bash
+# 方案一：mocker 多架构构建（需要 Podman machine）
+podman machine start
+mocker build --platform linux/arm64,linux/ppc64le -t myimage .
+
+# 方案二：直接使用 Podman
+podman machine start
+podman build --platform linux/ppc64le -t myimage:ppc64le .
+
+# 方案三：远程构建器（配置了 QEMU binfmt 的 Linux 机器）
 docker buildx create --driver docker-container \
   --platform linux/ppc64le,linux/s390x \
   ssh://user@your-linux-box
 docker buildx build --platform linux/ppc64le -t myimage:ppc64le .
 
-# 方案二：GitHub Actions（无需额外基础设施）
+# 方案四：GitHub Actions（无需额外基础设施）
 # 在 CI 中使用 docker/setup-qemu-action + docker/setup-buildx-action
-
-# 方案三：复用已运行的 Podman machine（已内置 QEMU）
-# 跟踪进展请见 us/mocker#10
 ```
 
-> **进度追踪：** 异构架构构建支持正在 [us/mocker#10](https://github.com/us/mocker/issues/10) 及上游 [apple/container#1496](https://github.com/apple/container/issues/1496) 中跟踪。
+> **进度追踪：** 异构架构构建支持正在 [us/mocker#10](https://github.com/us/mocker/issues/10) 及上游 [apple/container#1496](https://github.com/apple/container/issues/1496) 中跟踪。Manifest 组装方案（无需 Apple `container manifest`）正在 [us/mocker#11](https://github.com/us/mocker/issues/11) 中跟踪。
 
 ### 检查与统计
 

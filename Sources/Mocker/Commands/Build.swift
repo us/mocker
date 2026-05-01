@@ -1,4 +1,5 @@
 import ArgumentParser
+import Foundation
 import MockerKit
 
 struct Build: AsyncParsableCommand {
@@ -122,8 +123,17 @@ struct Build: AsyncParsableCommand {
     func run() async throws {
         let config = MockerConfig()
         try config.ensureDirectories()
-        let manager = try ImageManager(config: config)
 
+        // Multi-arch build: comma-separated platforms
+        if let platformStr = platform, platformStr.contains(",") {
+            let platforms = platformStr.split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            try await runMultiArchBuild(platforms: platforms)
+            return
+        }
+
+        let manager = try ImageManager(config: config)
         if !quiet {
             print("Building \(tag)...")
         }
@@ -139,4 +149,131 @@ struct Build: AsyncParsableCommand {
             print("Successfully tagged \(tag)")
         }
     }
+
+    // MARK: - Multi-arch build via Podman
+
+    private func runMultiArchBuild(platforms: [String]) async throws {
+        let nativePlatforms: Set<String> = ["linux/arm64", "linux/arm64/v8", "linux/amd64", "linux/x86_64"]
+        let exoticPlatforms = platforms.filter { !nativePlatforms.contains($0) }
+
+        print("Multi-arch build: \(platforms.joined(separator: ", "))")
+        if !exoticPlatforms.isEmpty {
+            print("Note: Exotic arches (\(exoticPlatforms.joined(separator: ", "))) require QEMU via Podman machine.")
+        }
+        print("Using Podman for all architectures to enable manifest assembly.\n")
+
+        guard await checkPodmanMachineRunning() else {
+            var hint = "No running Podman machine found. Start one with:\n"
+            hint += "  podman machine start\n\n"
+            let native = platforms.filter { nativePlatforms.contains($0) }
+            if !native.isEmpty {
+                hint += "You can build native arches individually without Podman:\n"
+                for arch in native {
+                    hint += "  mocker build --platform \(arch) -t \(tag) \(context)\n"
+                }
+            }
+            FileHandle.standardError.write(Data(hint.utf8))
+            throw MockerError.buildError("Multi-arch build requires a running Podman machine with QEMU support")
+        }
+
+        let baseTag = tag.contains(":") ? tag : "\(tag):latest"
+        let colonIdx = baseTag.firstIndex(of: ":")!
+        let imageName = String(baseTag[baseTag.startIndex..<colonIdx])
+        let imageVersion = String(baseTag[baseTag.index(after: colonIdx)...])
+
+        var archTags: [String] = []
+        for arch in platforms {
+            let slug = platformSlug(arch)
+            let archTag = "\(imageName):\(imageVersion)-\(slug)"
+            archTags.append(archTag)
+            print("Building [\(arch)] → \(archTag)")
+            try await runPodmanBuild(platform: arch, tag: archTag)
+            print("")
+        }
+
+        print("Assembling manifest: \(tag)")
+        try await runPodmanManifestCreate(manifestTag: tag, imageTags: archTags)
+
+        print("\nSuccessfully built multi-arch image: \(tag)")
+        print("Platforms: \(platforms.joined(separator: ", "))")
+        print("Arch-specific images:")
+        for (arch, archTag) in zip(platforms, archTags) {
+            print("  \(arch) → \(archTag)")
+        }
+    }
+
+    private func checkPodmanMachineRunning() async -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["podman", "machine", "list", "--format", "{{.Running}}"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        guard (try? process.run()) != nil else { return false }
+        let exitCode = await withCheckedContinuation { (continuation: CheckedContinuation<Int32, Never>) in
+            process.terminationHandler = { p in continuation.resume(returning: p.terminationStatus) }
+        }
+        guard exitCode == 0 else { return false }
+        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        return output.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.contains("true")
+    }
+
+    private func runPodmanBuild(platform: String, tag: String) async throws {
+        let contextURL = context.hasPrefix("/")
+            ? URL(fileURLWithPath: context)
+            : URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                .appendingPathComponent(context).standardized
+        let dockerfilePath = contextURL.appendingPathComponent(file).path
+
+        var args = ["build", "--platform", platform, "-t", tag, "-f", dockerfilePath]
+        if noCache { args.append("--no-cache") }
+        for arg in buildArg { args += ["--build-arg", arg] }
+        if let t = target { args += ["--target", t] }
+        for l in label { args += ["-l", l] }
+        args.append(contextURL.path)
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["podman"] + args
+        process.standardOutput = FileHandle.standardOutput
+        process.standardError = FileHandle.standardError
+        try process.run()
+        let exitCode = await withCheckedContinuation { (continuation: CheckedContinuation<Int32, Never>) in
+            process.terminationHandler = { p in continuation.resume(returning: p.terminationStatus) }
+        }
+        guard exitCode == 0 else {
+            throw MockerError.buildError("podman build failed for \(platform) (exit \(exitCode))")
+        }
+    }
+
+    private func runPodmanManifestCreate(manifestTag: String, imageTags: [String]) async throws {
+        // Remove existing manifest first (ignore errors)
+        let rmProcess = Process()
+        rmProcess.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        rmProcess.arguments = ["podman", "manifest", "rm", manifestTag]
+        rmProcess.standardOutput = Pipe()
+        rmProcess.standardError = Pipe()
+        try? rmProcess.run()
+        rmProcess.waitUntilExit()
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["podman", "manifest", "create", manifestTag] + imageTags
+        process.standardOutput = FileHandle.standardOutput
+        process.standardError = FileHandle.standardError
+        try process.run()
+        let exitCode = await withCheckedContinuation { (continuation: CheckedContinuation<Int32, Never>) in
+            process.terminationHandler = { p in continuation.resume(returning: p.terminationStatus) }
+        }
+        guard exitCode == 0 else {
+            throw MockerError.buildError("podman manifest create failed (exit \(exitCode))")
+        }
+    }
+
+    private func platformSlug(_ platform: String) -> String {
+        // linux/arm64/v8 → arm64v8, linux/ppc64le → ppc64le
+        let parts = platform.split(separator: "/").dropFirst()
+        return parts.joined()
+    }
 }
+

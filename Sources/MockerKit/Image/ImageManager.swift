@@ -110,6 +110,14 @@ public actor ImageManager {
 
     private static let containerCLI = "/usr/local/bin/container"
 
+    private static let nativeArches: Set<String> = [
+        "linux/arm64", "linux/arm64/v8", "linux/amd64", "linux/x86_64",
+    ]
+
+    static func isExoticArch(_ platform: String) -> Bool {
+        !nativeArches.contains(platform)
+    }
+
     /// Build an image from a Dockerfile using the `container` CLI.
     public func build(tag: String, context: String, dockerfile: String = "Dockerfile", noCache: Bool = false, buildArgs: [String] = [], platform: String? = nil, target: String? = nil, labels: [String] = [], quiet: Bool = false, progress: String? = nil, output: [String] = []) async throws -> ImageInfo {
         let contextURL: URL
@@ -124,6 +132,20 @@ public actor ImageManager {
 
         guard FileManager.default.fileExists(atPath: dockerfilePath) else {
             throw MockerError.buildError("Dockerfile not found at \(dockerfilePath)")
+        }
+
+        if let platform, Self.isExoticArch(platform) {
+            let warning = """
+                Warning: \(platform) requires QEMU emulation, which Apple's container runtime does not support.
+                         Any RUN instruction will fail with 'Exec format error'.
+                         To build for this architecture, use a Podman machine (which includes QEMU):
+                           podman machine start
+                           podman build --platform \(platform) -t \(tag) \(context)
+                         Or use mocker's multi-arch build:
+                           mocker build --platform linux/arm64,\(platform) -t \(tag) .
+
+                """
+            FileHandle.standardError.write(Data(warning.utf8))
         }
 
         var args = ["build", "-t", tag, "-f", dockerfilePath]
@@ -153,6 +175,14 @@ public actor ImageManager {
         }
 
         guard exitCode == 0 else {
+            if let platform, Self.isExoticArch(platform) {
+                throw MockerError.buildError(
+                    "Build failed for \(platform) (exit \(exitCode)) — Apple's container runtime has no QEMU support for this architecture.\n" +
+                    "Use Podman machine instead:\n" +
+                    "  podman machine start\n" +
+                    "  podman build --platform \(platform) -t \(tag) \(context)"
+                )
+            }
             throw MockerError.buildError("Build failed with exit code \(exitCode)")
         }
 
