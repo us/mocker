@@ -407,7 +407,15 @@ public func launchdActivateSocket(name: String) -> Int32? {
     #if canImport(Darwin)
     var fds: UnsafeMutablePointer<Int32>? = nil
     var count: size_t = 0
-    let result = launch_activate_socket(name, &fds, &count)
+    // launch_activate_socket expects UnsafeMutablePointer<UnsafeMutablePointer<Int32>> (non-optional
+    // inner pointer), but &fds from an Optional gives the optional-inner variant. Rebind the
+    // storage — Optional<UnsafeMutablePointer<Int32>> and UnsafeMutablePointer<Int32> have the
+    // same memory layout (8 bytes; nil == null pointer), so this is safe.
+    let result: Int32 = withUnsafeMutablePointer(to: &fds) { optPtr in
+        optPtr.withMemoryRebound(to: UnsafeMutablePointer<Int32>.self, capacity: 1) { ptr in
+            launch_activate_socket(name, ptr, &count)
+        }
+    }
     guard result == 0, let fds, count > 0 else { return nil }
     let fd = fds[0]
     free(fds)

@@ -45,7 +45,7 @@ jobs:
           done
 
           curl -sf --unix-socket "$SOCK" http://localhost/_ping > /dev/null \
-            || { echo "::error::/_ping did not respond"; kill $SERVICE_PID; exit 1; }
+            || { echo "::error::/_ping did not respond"; kill $SERVICE_PID 2>/dev/null || true; exit 1; }
 
           echo "/_ping: OK"
 
@@ -61,7 +61,7 @@ jobs:
             | python3 -c "import sys,json; d=json.load(sys.stdin); assert isinstance(d,list), f'expected array: {d}'"
           echo "/images/json: OK"
 
-          kill $SERVICE_PID
+          kill $SERVICE_PID 2>/dev/null || true
 
       - name: Integration test – Docker CLI
         run: |
@@ -75,7 +75,7 @@ jobs:
           done
 
           curl -sf --unix-socket "$SOCK" http://localhost/_ping > /dev/null \
-            || { echo "::error::socket not ready"; kill $SERVICE_PID; exit 1; }
+            || { echo "::error::socket not ready"; kill $SERVICE_PID 2>/dev/null || true; exit 1; }
 
           export DOCKER_HOST="unix://$SOCK"
           docker version
@@ -83,7 +83,7 @@ jobs:
           docker images
 
           echo "Docker CLI: OK"
-          kill $SERVICE_PID
+          kill $SERVICE_PID 2>/dev/null || true
 
       - name: Integration test – Podman CLI
         run: |
@@ -97,10 +97,12 @@ jobs:
           done
 
           curl -sf --unix-socket "$SOCK" http://localhost/_ping > /dev/null \
-            || { echo "::error::socket not ready"; kill $SERVICE_PID; exit 1; }
+            || { echo "::error::socket not ready"; kill $SERVICE_PID 2>/dev/null || true; exit 1; }
 
-          podman --url "unix://$SOCK" version
-          podman --url "unix://$SOCK" ps
+          # Set DOCKER_HOST so podman uses the Docker-compat API (not the libpod API)
+          export DOCKER_HOST="unix://$SOCK"
+          podman version
+          podman ps
 
           echo "Podman CLI: OK"
-          kill $SERVICE_PID
+          kill $SERVICE_PID 2>/dev/null || true
