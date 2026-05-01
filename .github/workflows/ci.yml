@@ -53,10 +53,10 @@ jobs:
         run: |
           # Wait up to 60 s for the service to become ready
           for i in $(seq 1 60); do
-            container system info > /dev/null 2>&1 && echo "container system ready" && break
+            container system status > /dev/null 2>&1 && echo "container system ready" && break
             sleep 1
           done
-          container system info
+          container system status
 
       - name: Integration test – socket via curl
         run: |
