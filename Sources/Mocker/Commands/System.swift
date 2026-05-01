@@ -1,4 +1,9 @@
 import ArgumentParser
+#if canImport(Darwin)
+import Darwin
+#else
+import Glibc
+#endif
 import Foundation
 import MockerKit
 
@@ -11,8 +16,50 @@ struct SystemCommand: AsyncParsableCommand {
             SystemPrune.self,
             SystemDf.self,
             SystemEvents.self,
+            SystemService.self,
         ]
     )
+}
+
+// MARK: - mocker system service
+
+struct SystemService: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "service",
+        abstract: "Run the Docker-compatible REST API server over a Unix socket"
+    )
+
+    @Option(name: .long, help: "Inactivity timeout before exiting (e.g. 5s, 30s, 5m). Omit for no timeout.")
+    var timeout: String?
+
+    @Option(name: .long, help: "Socket path to listen on (ignored when activated by launchd)")
+    var socketPath: String?
+
+    func run() async throws {
+        let config = MockerConfig()
+        try config.ensureDirectories()
+
+        let timeoutInterval = timeout.flatMap(parseTimeout)
+        let server = try DockerAPIServer(config: config, timeout: timeoutInterval)
+
+        // Try launchd socket activation first
+        if let fd = launchdActivateSocket(name: "MockerSocket") {
+            try await server.serve(serverFd: fd)
+        } else {
+            // Standalone mode: create socket at configured path
+            let sock = socketPath ?? config.socketPath
+            fputs("Listening on unix://\(sock)\n", Darwin.stderr)
+            try await server.serve(socketPath: sock)
+        }
+    }
+
+    /// Parse a duration string such as "5s", "30s", "5m", "1h" into seconds.
+    private func parseTimeout(_ s: String) -> TimeInterval? {
+        if s.hasSuffix("s"), let n = Double(s.dropLast()) { return n }
+        if s.hasSuffix("m"), let n = Double(s.dropLast()) { return n * 60 }
+        if s.hasSuffix("h"), let n = Double(s.dropLast()) { return n * 3600 }
+        return Double(s) // plain number treated as seconds
+    }
 }
 
 struct SystemInfo: AsyncParsableCommand {

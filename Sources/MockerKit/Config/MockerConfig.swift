@@ -67,6 +67,21 @@ public struct MockerConfig: Codable, Sendable {
     /// Directory for port proxy PID files.
     public var proxiesPath: String { "\(dataRoot)/proxies" }
 
+    /// Unix domain socket path served by `mocker system service`.
+    public var socketPath: String { "\(dataRoot)/mocker.sock" }
+
+    /// Path for the launchd user-agent plist that enables socket activation.
+    public var launchAgentPlistPath: String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return "\(home)/Library/LaunchAgents/io.mocker.socket.plist"
+    }
+
+    /// Label used for the launchd agent.
+    public static let launchAgentLabel = "io.mocker.socket"
+
+    /// Mocker version string, kept in sync with Version.currentVersion in the CLI target.
+    public static let mockerVersion = "0.2.0"
+
     /// Ensure all required directories exist.
     public func ensureDirectories() throws {
         let fm = FileManager.default
