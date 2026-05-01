@@ -478,6 +478,7 @@ public actor DockerAPIServer {
     private static func writeHTTPResponse(fd: Int32, response: HTTPResponse) {
         var head = "HTTP/1.1 \(response.status) \(response.statusText)\r\n"
         for (k, v) in response.headers { head += "\(k): \(v)\r\n" }
+        if response.status != 101 { head += "Connection: close\r\n" }
         head += "\r\n"
 
         var data = Data(head.utf8)
