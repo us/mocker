@@ -20,6 +20,14 @@ jobs:
         with:
           xcode-version: latest-stable
 
+      - name: Cache Swift build artifacts
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-swift-${{ hashFiles('Package.swift', 'Package.resolved', 'Sources/**/*.swift', 'Tests/**/*.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-swift-
+
       - name: Build
         run: swift build
 
