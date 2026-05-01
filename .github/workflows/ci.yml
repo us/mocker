@@ -35,6 +35,16 @@ jobs:
             https://github.com/apple/container/releases/download/0.12.3/container-installer-unsigned.pkg
           sudo installer -pkg /tmp/container.pkg -target /
 
+      - name: Start Apple container system service
+        run: |
+          container system start
+          # Wait up to 60 s for the service to become ready
+          for i in $(seq 1 60); do
+            container system info > /dev/null 2>&1 && echo "container system ready" && break
+            sleep 1
+          done
+          container system info
+
       - name: Install Docker and Podman CLIs
         run: brew install --quiet docker podman
 
