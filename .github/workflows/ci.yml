@@ -29,6 +29,12 @@ jobs:
       - name: Build release binary
         run: swift build -c release --product mocker
 
+      - name: Install Apple container CLI
+        run: |
+          curl -fsSL -o /tmp/container.pkg \
+            https://github.com/apple/container/releases/download/0.12.3/container-installer-unsigned.pkg
+          sudo installer -pkg /tmp/container.pkg -target /
+
       - name: Install Docker and Podman CLIs
         run: brew install --quiet docker podman
 
