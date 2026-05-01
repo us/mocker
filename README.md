@@ -345,23 +345,28 @@ podman run --rm alpine cat /etc/os-release
 
 **Alternative: symlink method (no environment variable)**
 
-Podman Desktop's Docker compatibility feature works by symlinking the default
-socket path. You can replicate this for Mocker:
+On macOS, when neither `CONTAINER_HOST` nor `XDG_RUNTIME_DIR` is set and no
+Podman machine is running, Podman falls back to
+`$TMPDIR/storage-run-$(id -u)/podman/podman.sock`
+([source](https://github.com/containers/storage/blob/main/pkg/homedir/homedir_unix.go)).
+`$TMPDIR` on macOS resolves to `/var/folders/…/<hash>/T/` — a stable per-user
+path that persists across reboots. Create the directory and symlink Mocker's
+socket there:
 
 ```bash
-# Point Podman's default machine socket to Mocker's socket
-PODMAN_SOCK_DIR="$HOME/.local/share/containers/podman/machine/qemu"
+# Point Podman's default socket to Mocker's socket (macOS)
+PODMAN_SOCK_DIR="${TMPDIR%/}/storage-run-$(id -u)/podman"
 mkdir -p "$PODMAN_SOCK_DIR"
 ln -sf "$HOME/.mocker/mocker.sock" "$PODMAN_SOCK_DIR/podman.sock"
 
-# Now works without any env var (uses Podman's default socket search path)
+# Now works without any env var
 podman version
 podman ps
 ```
 
 To undo:
 ```bash
-rm "$HOME/.local/share/containers/podman/machine/qemu/podman.sock"
+rm "${TMPDIR%/}/storage-run-$(id -u)/podman/podman.sock"
 ```
 
 #### Automatic startup via launchd (macOS)

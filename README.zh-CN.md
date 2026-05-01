@@ -318,6 +318,30 @@ podman ps
 podman run --rm alpine cat /etc/os-release
 ```
 
+**替代方案：符号链接（无需环境变量）**
+
+在 macOS 上，若未设置 `CONTAINER_HOST` 和 `XDG_RUNTIME_DIR` 且没有运行 Podman machine，
+Podman 会回退至 `$TMPDIR/storage-run-$(id -u)/podman/podman.sock`
+（[源码](https://github.com/containers/storage/blob/main/pkg/homedir/homedir_unix.go)）。
+macOS 上的 `$TMPDIR` 解析为 `/var/folders/…/<hash>/T/`，这是每用户的稳定路径，
+**重启后不会丢失**。创建目录并将 Mocker 的 socket 软链至此处：
+
+```bash
+# 将 Podman 默认 socket 指向 Mocker（macOS）
+PODMAN_SOCK_DIR="${TMPDIR%/}/storage-run-$(id -u)/podman"
+mkdir -p "$PODMAN_SOCK_DIR"
+ln -sf "$HOME/.mocker/mocker.sock" "$PODMAN_SOCK_DIR/podman.sock"
+
+# 无需环境变量即可使用
+podman version
+podman ps
+```
+
+撤销：
+```bash
+rm "${TMPDIR%/}/storage-run-$(id -u)/podman/podman.sock"
+```
+
 #### 通过 launchd 自动启动（macOS）
 
 如需在登录时自动启动 socket 服务并在后台保持运行，可将其注册为 launchd 用户代理。
