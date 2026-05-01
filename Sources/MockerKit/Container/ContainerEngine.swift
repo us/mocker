@@ -64,26 +64,12 @@ public actor ContainerEngine {
 
         try process.run()
 
+        // Read both pipes serially inside terminationHandler (after process exit, no concurrency issue).
         return await withCheckedContinuation { continuation in
-            let group = DispatchGroup()
-            var outData = Data()
-            var errData = Data()
-
-            group.enter()
-            DispatchQueue.global().async {
-                outData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                group.leave()
-            }
-            group.enter()
-            DispatchQueue.global().async {
-                errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-                group.leave()
-            }
-
             process.terminationHandler = { p in
-                group.notify(queue: .global()) {
-                    continuation.resume(returning: (stdout: outData, stderr: errData, exitCode: p.terminationStatus))
-                }
+                let outData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+                let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                continuation.resume(returning: (stdout: outData, stderr: errData, exitCode: p.terminationStatus))
             }
         }
     }
