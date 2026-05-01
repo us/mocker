@@ -285,6 +285,32 @@ enum DockerAPIHandlers {
             return await inspectImage(imageManager: imageManager, name: name)
         }
 
+        // Podman libpod API – minimal subset so `podman version` and `podman ps` work
+        // when CONTAINER_HOST points at the mocker socket.
+        if path.hasPrefix("/libpod/") {
+            let subpath = String(path.dropFirst("/libpod".count)) // "/libpod/foo" → "/foo"
+            if method == "GET" && (subpath == "/_ping" || subpath == "/ping") {
+                return .text(200, body: "OK")
+            }
+            if method == "HEAD" && (subpath == "/_ping" || subpath == "/ping") {
+                return .text(200, body: "")
+            }
+            if method == "GET" && subpath == "/version" {
+                return libpodVersionResponse()
+            }
+            if method == "GET" && subpath == "/info" {
+                return await infoResponse(engine: engine, imageManager: imageManager)
+            }
+            if method == "GET" && subpath == "/containers/json" {
+                let all = request.queryItems["all"].map { $0 == "1" || $0 == "true" } ?? false
+                return await listContainers(engine: engine, all: all)
+            }
+            if method == "GET" && subpath == "/images/json" {
+                return await listImages(imageManager: imageManager)
+            }
+            return .error(404, message: "libpod endpoint not implemented: \(path)")
+        }
+
         return .error(404, message: "page not found")
     }
 
