@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    branches: [main, copilot/implement-mocker-enhancement-7]
 
 jobs:
   test:
@@ -25,3 +25,82 @@ jobs:
 
       - name: Test
         run: swift test
+
+      - name: Build release binary
+        run: swift build -c release --product mocker
+
+      - name: Install Docker and Podman CLIs
+        run: brew install --quiet docker podman
+
+      - name: Integration test – socket via curl
+        run: |
+          SOCK=/tmp/mocker-ci-curl.sock
+          .build/release/mocker system service --socket-path "$SOCK" --timeout 60s &
+          SERVICE_PID=$!
+
+          # Wait up to 15 s for the server to respond on the socket
+          for i in $(seq 1 30); do
+            curl -sf --unix-socket "$SOCK" http://localhost/_ping > /dev/null 2>&1 && break
+            sleep 0.5
+          done
+
+          curl -sf --unix-socket "$SOCK" http://localhost/_ping > /dev/null \
+            || { echo "::error::/_ping did not respond"; kill $SERVICE_PID; exit 1; }
+
+          echo "/_ping: OK"
+
+          curl -sf --unix-socket "$SOCK" http://localhost/v1.47/version \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); assert d['ApiVersion']=='1.47', f'bad ApiVersion: {d}'"
+          echo "/version: OK"
+
+          curl -sf --unix-socket "$SOCK" http://localhost/v1.47/containers/json \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); assert isinstance(d,list), f'expected array: {d}'"
+          echo "/containers/json: OK"
+
+          curl -sf --unix-socket "$SOCK" http://localhost/v1.47/images/json \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); assert isinstance(d,list), f'expected array: {d}'"
+          echo "/images/json: OK"
+
+          kill $SERVICE_PID
+
+      - name: Integration test – Docker CLI
+        run: |
+          SOCK=/tmp/mocker-ci-docker.sock
+          .build/release/mocker system service --socket-path "$SOCK" --timeout 60s &
+          SERVICE_PID=$!
+
+          for i in $(seq 1 30); do
+            curl -sf --unix-socket "$SOCK" http://localhost/_ping > /dev/null 2>&1 && break
+            sleep 0.5
+          done
+
+          curl -sf --unix-socket "$SOCK" http://localhost/_ping > /dev/null \
+            || { echo "::error::socket not ready"; kill $SERVICE_PID; exit 1; }
+
+          export DOCKER_HOST="unix://$SOCK"
+          docker version
+          docker ps
+          docker images
+
+          echo "Docker CLI: OK"
+          kill $SERVICE_PID
+
+      - name: Integration test – Podman CLI
+        run: |
+          SOCK=/tmp/mocker-ci-podman.sock
+          .build/release/mocker system service --socket-path "$SOCK" --timeout 60s &
+          SERVICE_PID=$!
+
+          for i in $(seq 1 30); do
+            curl -sf --unix-socket "$SOCK" http://localhost/_ping > /dev/null 2>&1 && break
+            sleep 0.5
+          done
+
+          curl -sf --unix-socket "$SOCK" http://localhost/_ping > /dev/null \
+            || { echo "::error::socket not ready"; kill $SERVICE_PID; exit 1; }
+
+          podman --url "unix://$SOCK" version
+          podman --url "unix://$SOCK" ps
+
+          echo "Podman CLI: OK"
+          kill $SERVICE_PID
