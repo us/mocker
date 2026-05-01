@@ -43,7 +43,8 @@ jobs:
             https://github.com/apple/container/releases/download/0.12.3/container-installer-unsigned.pkg
           sudo installer -pkg /tmp/container.pkg -target /
           # Start the service now so it initialises while Docker/Podman are being installed
-          container system start
+          # Pipe 'y' to automatically accept the default kernel installation prompt in non-interactive CI
+          printf 'y\n' | container system start || true
 
       - name: Install Docker and Podman CLIs
         run: brew install --quiet docker podman
