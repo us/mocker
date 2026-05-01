@@ -1,9 +1,4 @@
 import ArgumentParser
-#if canImport(Darwin)
-import Darwin
-#else
-import Glibc
-#endif
 import Foundation
 import MockerKit
 
@@ -48,7 +43,7 @@ struct SystemService: AsyncParsableCommand {
         } else {
             // Standalone mode: create socket at configured path
             let sock = socketPath ?? config.socketPath
-            fputs("Listening on unix://\(sock)\n", Darwin.stderr)
+            FileHandle.standardError.write(Data("Listening on unix://\(sock)\n".utf8))
             try await server.serve(socketPath: sock)
         }
     }

@@ -235,6 +235,7 @@ public actor DockerAPIServer {
         }
         path.withCString { cStr in
             withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
+                // 104 = sizeof(sockaddr_un.sun_path) on macOS/Linux; leave room for NUL terminator (103 chars max).
                 ptr.withMemoryRebound(to: CChar.self, capacity: 104) { dest in
                     _ = strncpy(dest, cStr, 103)
                 }
@@ -284,7 +285,7 @@ public actor DockerAPIServer {
         var headerEnd: Int? = nil
         let marker = Data([0x0D, 0x0A, 0x0D, 0x0A]) // \r\n\r\n
 
-        while raw.count < 131_072 { // 128 KB guard
+        while raw.count < 131_072 { // 128 KB guard: limits memory use from malformed/malicious headers
             let chunk = await readChunk(fd: fd, maxBytes: 4096)
             guard !chunk.isEmpty else { break }
             raw.append(chunk)
