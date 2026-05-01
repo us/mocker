@@ -172,9 +172,45 @@ mocker rmi my-registry.io/alpine:v1
 # Build from Dockerfile
 mocker build -t myapp:latest .
 
+# Build for a specific architecture
+mocker build --platform linux/amd64 -t myapp:amd64 .
+mocker build --platform linux/arm64 -t myapp:arm64 .
+
 # Push to registry
 mocker push my-registry.io/myapp:latest
 ```
+
+#### Architecture support for builds
+
+| Architecture | `mocker build` | `mocker run` | Notes |
+|---|:---:|:---:|---|
+| `linux/arm64` | ✅ | ✅ | Native — Apple Silicon |
+| `linux/amd64` | ✅ | ✅ | Via Rosetta 2 hardware translation |
+| `linux/ppc64le` | ⚠️ | ❌ | Build works if no `RUN` steps; `RUN` fails (Exec format error) |
+| `linux/s390x` | ⚠️ | ❌ | Same limitation as ppc64le |
+| `linux/riscv64` | ⚠️ | ❌ | Same limitation |
+
+`linux/amd64` works seamlessly because Apple Silicon includes Rosetta 2 — hardware x86 translation. For other non-native architectures (ppc64le, s390x, riscv64), Dockerfiles with only `FROM`/`COPY`/`CMD` steps build successfully (layers are repackaged from the multi-arch base image), but any `RUN` instruction fails with `Exec format error` because Apple's build VM has no QEMU user-mode emulation for those ISAs.
+
+For comparison, Podman machine on macOS handles ppc64le/s390x `RUN` steps via QEMU inside its Fedora CoreOS VM — at the cost of a persistent shared VM.
+
+**Workarounds for exotic-arch `RUN` steps:**
+
+```bash
+# Option 1: Remote builder (Linux box with QEMU binfmt)
+docker buildx create --driver docker-container \
+  --platform linux/ppc64le,linux/s390x \
+  ssh://user@your-linux-box
+docker buildx build --platform linux/ppc64le -t myimage:ppc64le .
+
+# Option 2: GitHub Actions (zero infrastructure)
+# Use docker/setup-qemu-action + docker/setup-buildx-action in CI
+
+# Option 3: Reuse a running Podman machine (already has QEMU)
+# See us/mocker#10 for tracking native support
+```
+
+> **Tracking:** exotic-arch build support is tracked in [us/mocker#10](https://github.com/us/mocker/issues/10) and upstream in [apple/container#1496](https://github.com/apple/container/issues/1496).
 
 ### Inspect & Stats
 

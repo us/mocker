@@ -171,9 +171,45 @@ mocker rmi my-registry.io/alpine:v1
 # 从 Dockerfile 构建
 mocker build -t myapp:latest .
 
+# 指定架构构建
+mocker build --platform linux/amd64 -t myapp:amd64 .
+mocker build --platform linux/arm64 -t myapp:arm64 .
+
 # 推送到镜像仓库
 mocker push my-registry.io/myapp:latest
 ```
+
+#### 构建架构支持情况
+
+| 架构 | `mocker build` | `mocker run` | 说明 |
+|---|:---:|:---:|---|
+| `linux/arm64` | ✅ | ✅ | 原生 — Apple Silicon |
+| `linux/amd64` | ✅ | ✅ | 通过 Rosetta 2 硬件转译 |
+| `linux/ppc64le` | ⚠️ | ❌ | 无 `RUN` 步骤时可构建；`RUN` 会报 Exec format error |
+| `linux/s390x` | ⚠️ | ❌ | 与 ppc64le 限制相同 |
+| `linux/riscv64` | ⚠️ | ❌ | 与 ppc64le 限制相同 |
+
+`linux/amd64` 之所以无缝支持，是因为 Apple Silicon 内置了 Rosetta 2（x86 硬件转译）。对于其他非原生架构（ppc64le、s390x、riscv64），仅含 `FROM`/`COPY`/`CMD` 的 Dockerfile 可以成功构建（直接复用多架构基础镜像的对应层），但任何 `RUN` 指令都会因 Apple 构建 VM 未注册 QEMU 用户态模拟而报 `Exec format error`。
+
+作为对比，macOS 上的 Podman machine 可通过其 Fedora CoreOS VM 内置的 QEMU 处理 ppc64le/s390x 的 `RUN` 步骤——代价是需要维护一个持久的共享虚拟机。
+
+**针对异构架构 `RUN` 步骤的替代方案：**
+
+```bash
+# 方案一：远程构建器（配置了 QEMU binfmt 的 Linux 机器）
+docker buildx create --driver docker-container \
+  --platform linux/ppc64le,linux/s390x \
+  ssh://user@your-linux-box
+docker buildx build --platform linux/ppc64le -t myimage:ppc64le .
+
+# 方案二：GitHub Actions（无需额外基础设施）
+# 在 CI 中使用 docker/setup-qemu-action + docker/setup-buildx-action
+
+# 方案三：复用已运行的 Podman machine（已内置 QEMU）
+# 跟踪进展请见 us/mocker#10
+```
+
+> **进度追踪：** 异构架构构建支持正在 [us/mocker#10](https://github.com/us/mocker/issues/10) 及上游 [apple/container#1496](https://github.com/apple/container/issues/1496) 中跟踪。
 
 ### 检查与统计
 
