@@ -159,6 +159,7 @@ actor PendingRunStore {
     }
 
     func getConfig(id: String) -> ContainerConfig? { entries[id]?.config }
+    func getEntry(id: String) -> Entry? { entries[id] }
 
     func recordExit(id: String, code: Int32) {
         guard var e = entries[id] else { return }

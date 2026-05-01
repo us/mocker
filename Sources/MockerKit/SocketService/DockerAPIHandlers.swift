@@ -348,14 +348,27 @@ enum DockerAPIHandlers {
                 let id = midSegment(subpath, prefix: "/containers/", suffix: "/wait")
                 return await waitContainer(runStore: runStore, id: id, libpod: true)
             }
+            if method == "GET" && subpath.hasPrefix("/containers/") && subpath.hasSuffix("/json") {
+                let id = midSegment(subpath, prefix: "/containers/", suffix: "/json")
+                return await libpodInspectContainer(engine: engine, runStore: runStore, id: id)
+            }
             if method == "DELETE" && subpath.hasPrefix("/containers/") {
                 let id = String(subpath.dropFirst("/containers/".count))
+                struct RmReport: Encodable, Sendable { let Id: String }
                 if await runStore.getConfig(id: id) != nil {
                     await runStore.remove(id: id)
-                    return .noContent()
+                    return .json(body: [RmReport(Id: id)])
                 }
                 let force = request.queryItems["force"].map { $0 == "1" || $0 == "true" } ?? false
-                return await removeContainer(engine: engine, id: id, force: force)
+                do {
+                    _ = try await engine.remove(id, force: force)
+                    return .json(body: [RmReport(Id: id)])
+                } catch let error as MockerError {
+                    if case .containerNotFound = error { return .error(404, message: error.localizedDescription) }
+                    return .error(500, message: error.localizedDescription)
+                } catch {
+                    return .error(500, message: "\(error)")
+                }
             }
             if method == "GET" && subpath == "/images/json" {
                 return await listImages(imageManager: imageManager)
@@ -543,6 +556,76 @@ extension DockerAPIHandlers {
             Mounts: []
         )
         return .json(body: inspect)
+    }
+
+    static func libpodInspectContainer(engine: ContainerEngine, runStore: PendingRunStore, id: String) async -> HTTPResponse {
+        struct LibpodState: Encodable, Sendable {
+            let Status: String
+            let Running: Bool
+            let ExitCode: Int32
+            let Dead: Bool
+            let Pid: Int
+            let OOMKilled: Bool
+            let Error: String
+            let StartedAt: String
+            let FinishedAt: String
+        }
+        struct LibpodConfig: Encodable, Sendable { let Image: String }
+        struct LibpodInspect: Encodable, Sendable {
+            let Id: String
+            let Name: String
+            let State: LibpodState
+            let Image: String
+            let ImageName: String
+            let Config: LibpodConfig
+        }
+        let iso = ISO8601DateFormatter()
+        let epoch = "0001-01-01T00:00:00Z"
+        let now = iso.string(from: Date())
+        if let entry = await runStore.getEntry(id: id) {
+            let status = entry.exited ? "exited" : "running"
+            return .json(body: LibpodInspect(
+                Id: id,
+                Name: entry.config.name ?? id,
+                State: LibpodState(
+                    Status: status,
+                    Running: !entry.exited,
+                    ExitCode: entry.exitCode,
+                    Dead: false,
+                    Pid: 0,
+                    OOMKilled: false,
+                    Error: "",
+                    StartedAt: now,
+                    FinishedAt: entry.exited ? now : epoch
+                ),
+                Image: entry.config.image,
+                ImageName: entry.config.image,
+                Config: LibpodConfig(Image: entry.config.image)
+            ))
+        }
+        // Fall back to engine container
+        guard let c = try? await engine.inspect(id) else {
+            return .error(404, message: "No such container: \(id)")
+        }
+        let running = c.state == .running
+        return .json(body: LibpodInspect(
+            Id: c.id,
+            Name: c.name,
+            State: LibpodState(
+                Status: c.state.rawValue,
+                Running: running,
+                ExitCode: 0,
+                Dead: c.state == .dead,
+                Pid: c.pid ?? 0,
+                OOMKilled: false,
+                Error: "",
+                StartedAt: running ? now : epoch,
+                FinishedAt: running ? epoch : now
+            ),
+            Image: c.image,
+            ImageName: c.image,
+            Config: LibpodConfig(Image: c.image)
+        ))
     }
 
     static func startContainer(engine: ContainerEngine, id: String) async -> HTTPResponse {
