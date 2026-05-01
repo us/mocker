@@ -309,6 +309,30 @@ docker images         # lists images via mocker
 docker run --rm alpine cat /etc/os-release
 ```
 
+**Alternative: symlink method (no environment variable)**
+
+Create a symlink at the default Docker socket path so Docker CLI finds Mocker
+without any `DOCKER_HOST` setting — the same approach Podman Desktop uses for
+its Docker compatibility mode:
+
+```bash
+# Point the default Docker socket to Mocker's socket
+sudo ln -sf "$HOME/.mocker/mocker.sock" /var/run/docker.sock
+
+# Now works without any env var
+docker version
+docker ps
+```
+
+To undo:
+```bash
+sudo rm /var/run/docker.sock
+```
+
+> **Note:** `/var/run/docker.sock` is owned by root on macOS. If another tool
+> (Docker Desktop, Podman Desktop) is already symlinking that path, this will
+> override it. Set `DOCKER_HOST` instead if you need both tools available.
+
 #### Use with Podman CLI
 
 ```bash
@@ -317,6 +341,27 @@ export CONTAINER_HOST="unix://$HOME/.mocker/mocker.sock"
 podman version
 podman ps
 podman run --rm alpine cat /etc/os-release
+```
+
+**Alternative: symlink method (no environment variable)**
+
+Podman Desktop's Docker compatibility feature works by symlinking the default
+socket path. You can replicate this for Mocker:
+
+```bash
+# Point Podman's default machine socket to Mocker's socket
+PODMAN_SOCK_DIR="$HOME/.local/share/containers/podman/machine/qemu"
+mkdir -p "$PODMAN_SOCK_DIR"
+ln -sf "$HOME/.mocker/mocker.sock" "$PODMAN_SOCK_DIR/podman.sock"
+
+# Now works without any env var (uses Podman's default socket search path)
+podman version
+podman ps
+```
+
+To undo:
+```bash
+rm "$HOME/.local/share/containers/podman/machine/qemu/podman.sock"
 ```
 
 #### Automatic startup via launchd (macOS)
