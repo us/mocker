@@ -5,6 +5,27 @@ All notable changes to Mocker are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0](https://github.com/us/mocker/compare/v0.2.1...v0.3.0) (2026-05-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **build:** MockerKit consumers calling `ImageManager.build(platform:)` must migrate to `platforms:`.
+
+### Features
+
+* **build:** support multi-platform builds via repeated --platform ([685979b](https://github.com/us/mocker/commit/685979bc442561b424b18e56a887df86dc181d44))
+* **config:** auto-detect Apple container CLI store ([941ea6b](https://github.com/us/mocker/commit/941ea6bf4a839cce84f0e0ee4a3669422c95314a))
+* **manifest:** add 'manifest add', 'rm', and 'push' subcommands ([b6fa46a](https://github.com/us/mocker/commit/b6fa46a3b3e1fa418f7727cc6ee66000fb197866))
+* **manifest:** add 'mocker manifest annotate' for platform metadata overrides ([3d7f7a9](https://github.com/us/mocker/commit/3d7f7a93c63177effcc3b9f6fb080d7a6030eab5))
+* **manifest:** add 'mocker manifest create' to assemble OCI image indexes ([a62312d](https://github.com/us/mocker/commit/a62312dd981eed62ebb5555443d854f52f13e129))
+* **manifest:** add 'mocker manifest inspect' for OCI image indexes ([d051edb](https://github.com/us/mocker/commit/d051edb2c3c1370de0b30b71d28ded84869689c5))
+
+
+### Bug Fixes
+
+* **image:** wire --platform through pull/push and drop hardcoded arm64 ([148d045](https://github.com/us/mocker/commit/148d0453f4d271c88dbd46c7fd9de4cee29952d6))
+
 ## [0.2.1](https://github.com/us/mocker/compare/v0.2.0...v0.2.1) (2026-04-25)
 
 
