@@ -5,6 +5,13 @@ All notable changes to Mocker are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1](https://github.com/us/mocker/compare/v0.3.0...v0.3.1) (2026-05-05)
+
+
+### Bug Fixes
+
+* **manifest:** orphan blob safety, CLI UX, and version sync ([a27f94d](https://github.com/us/mocker/commit/a27f94da31745a732396ad11d4450862056b9702))
+
 ## [0.3.0](https://github.com/us/mocker/compare/v0.2.1...v0.3.0) (2026-05-05)
 
 
