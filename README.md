@@ -222,10 +222,11 @@ handlers** for non-arm64/non-amd64 architectures. `linux/amd64` works only becau
 Silicon ships hardware Rosetta 2 translation. Tracking upstream:
 [apple/container#1496](https://github.com/apple/container/issues/1496).
 
-Until Apple ships QEMU support, two workarounds exist:
+Until Apple ships QEMU support, three workarounds exist:
 
 | Path | Tradeoff |
 |------|----------|
+| **Remote builder.** Point mocker at a Linux host that already has QEMU `binfmt` registered: `mocker build --builder <name> --platform linux/ppc64le …`. The `--builder` value is forwarded to `container build --builder`, which can target a remote BuildKit node (e.g. one registered via `docker buildx create --driver remote ssh://host`). The `RUN` steps then execute on the remote host's emulation, not the local arm64 VM. | Needs a reachable remote Linux host (native ppc64le, or x86/arm with `qemu-user-static`) and a one-time builder registration. |
 | **Run a Podman machine** alongside mocker. Its Fedora CoreOS VM has `qemu-user-static` registered, so `podman build --platform linux/ppc64le` handles `RUN` steps. Use `mocker manifest create` afterwards to assemble per-arch images into a list. | Requires a persistent QEMU VM — extra memory and reliability surface. |
 | **`container run --virtualization`** a Linux VM, install `qemu-user-static` + Docker inside, build there, then `container image save` / `mocker manifest add` the result. | Manual setup; one-time per arch you need. |
 

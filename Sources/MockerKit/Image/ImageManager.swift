@@ -115,9 +115,37 @@ public actor ImageManager {
 
     private static let containerCLI = CLIResolver.resolve()
 
+    /// Construct the argument vector for `container build`.
+    ///
+    /// Pure and side-effect-free so it can be unit-tested without spawning a
+    /// process. The `builder` value maps to `container build --builder`, the
+    /// manual escape hatch for exotic architectures (ppc64le/s390x/riscv64) that
+    /// the local arm64 BuildKit VM cannot emulate — see README and apple/container#1496.
+    static func makeBuildArguments(
+        tag: String, dockerfilePath: String, context: String, noCache: Bool = false,
+        buildArgs: [String] = [], platforms: [String] = [], target: String? = nil,
+        labels: [String] = [], quiet: Bool = false, progress: String? = nil,
+        output: [String] = [], builder: String? = nil
+    ) -> [String] {
+        var args = ["build", "-t", tag, "-f", dockerfilePath]
+        if noCache { args.append("--no-cache") }
+        for arg in buildArgs { args += ["--build-arg", arg] }
+        for p in platforms { args += ["--platform", p] }
+        if let target { args += ["--target", target] }
+        for l in labels { args += ["-l", l] }
+        if quiet { args.append("-q") }
+        if let progress { args += ["--progress", progress] }
+        for o in output { args += ["-o", o] }
+        if let builder, !builder.isEmpty { args += ["--builder", builder] }
+        args.append(context)
+        return args
+    }
+
     /// Build an image from a Dockerfile using the `container` CLI.
     /// - Parameter platforms: pass multiple values to build a multi-arch manifest list (e.g. `["linux/amd64", "linux/arm64"]`).
-    public func build(tag: String, context: String, dockerfile: String = "Dockerfile", noCache: Bool = false, buildArgs: [String] = [], platforms: [String] = [], target: String? = nil, labels: [String] = [], quiet: Bool = false, progress: String? = nil, output: [String] = []) async throws -> ImageInfo {
+    /// - Parameter builder: optional named builder instance forwarded to `container build --builder`,
+    ///   enabling a remote BuildKit node for exotic architectures (apple/container#1496).
+    public func build(tag: String, context: String, dockerfile: String = "Dockerfile", noCache: Bool = false, buildArgs: [String] = [], platforms: [String] = [], target: String? = nil, labels: [String] = [], quiet: Bool = false, progress: String? = nil, output: [String] = [], builder: String? = nil) async throws -> ImageInfo {
         let contextURL: URL
         if context.hasPrefix("/") {
             contextURL = URL(fileURLWithPath: context)
@@ -132,16 +160,11 @@ public actor ImageManager {
             throw MockerError.buildError("Dockerfile not found at \(dockerfilePath)")
         }
 
-        var args = ["build", "-t", tag, "-f", dockerfilePath]
-        if noCache { args.append("--no-cache") }
-        for arg in buildArgs { args += ["--build-arg", arg] }
-        for p in platforms { args += ["--platform", p] }
-        if let target { args += ["--target", target] }
-        for l in labels { args += ["-l", l] }
-        if quiet { args.append("-q") }
-        if let progress { args += ["--progress", progress] }
-        for o in output { args += ["-o", o] }
-        args.append(context)
+        let args = Self.makeBuildArguments(
+            tag: tag, dockerfilePath: dockerfilePath, context: context, noCache: noCache,
+            buildArgs: buildArgs, platforms: platforms, target: target, labels: labels,
+            quiet: quiet, progress: progress, output: output, builder: builder
+        )
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: Self.containerCLI)
