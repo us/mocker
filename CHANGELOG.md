@@ -5,6 +5,18 @@ All notable changes to Mocker are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2](https://github.com/us/mocker/compare/v0.3.1...v0.3.2) (2026-06-11)
+
+
+### Features
+
+* **build:** forward --builder to container build ([3024963](https://github.com/us/mocker/commit/3024963403b127c5193c00c4cb3dc422e0c2ce96)), closes [#10](https://github.com/us/mocker/issues/10)
+
+
+### Bug Fixes
+
+* **compose:** forward build.target/args and honor image+build ([#14](https://github.com/us/mocker/issues/14)) ([31a9a69](https://github.com/us/mocker/commit/31a9a6987590c5ba2d7a7931a24a18e072a1e4b2))
+
 ## [0.3.1](https://github.com/us/mocker/compare/v0.3.0...v0.3.1) (2026-05-05)
 
 
