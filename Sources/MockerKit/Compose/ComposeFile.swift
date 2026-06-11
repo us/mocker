@@ -216,7 +216,9 @@ public struct ComposeService: Sendable {
             } else if let buildDict = buildVal as? [String: Any] {
                 build = ComposeBuild(
                     context: buildDict["context"] as? String ?? ".",
-                    dockerfile: buildDict["dockerfile"] as? String
+                    dockerfile: buildDict["dockerfile"] as? String,
+                    target: buildDict["target"] as? String,
+                    args: parseBuildArgs(buildDict["args"])
                 )
             }
         }
@@ -238,6 +240,35 @@ public struct ComposeService: Sendable {
         )
     }
 
+    /// Default tag for an image built from this service's `build` config.
+    public func buildTag(projectName: String) -> String {
+        image ?? "\(projectName)-\(name):latest"
+    }
+
+    /// Decide how this service's image should be obtained, per the Compose spec.
+    ///
+    /// When `build:` is present (and not disabled via `--no-build`) the image is
+    /// built from the Dockerfile context and tagged with `image:` if specified —
+    /// it is never pulled. Only when there is no buildable config does `image:`
+    /// trigger a registry pull. This is a pure function so it can be unit-tested
+    /// without the container runtime.
+    public func resolveImageSource(projectName: String, noBuild: Bool = false) -> ComposeImageSource {
+        if let build, !noBuild {
+            return .build(tag: buildTag(projectName: projectName), build: build)
+        } else if let image {
+            return .pull(image: image)
+        } else {
+            return .none
+        }
+    }
+
+    /// Whether an existing image matches `tag` (repository suffix + tag), used to
+    /// skip rebuilds when `--build` was not requested.
+    public static func imageMatches(_ info: ImageInfo, tag: String) -> Bool {
+        guard let ref = try? ImageReference.parse(tag) else { return false }
+        return info.repository.hasSuffix(ref.repository) && info.tag == ref.tag
+    }
+
     private static func parseEnvironment(_ value: Any?) -> [String: String] {
         var env: [String: String] = [:]
         if let dict = value as? [String: Any] {
@@ -251,6 +282,29 @@ public struct ComposeService: Sendable {
             }
         }
         return env
+    }
+
+    /// Parse `build.args`, accepting both the map form (`KEY: value`) and the
+    /// list form (`- KEY=value`). A bare `KEY` (no `=`) inherits the value from
+    /// the host environment, matching Docker Compose semantics. An explicit empty
+    /// value (`KEY=`) is preserved as an empty string rather than dropped.
+    static func parseBuildArgs(_ value: Any?) -> [String: String] {
+        var args: [String: String] = [:]
+        if let dict = value as? [String: Any] {
+            for (k, v) in dict { args[k] = "\(v)" }
+        } else if let list = value as? [Any] {
+            for item in list {
+                let str = "\(item)"
+                if let eq = str.firstIndex(of: "=") {
+                    let key = String(str[str.startIndex..<eq])
+                    let val = String(str[str.index(after: eq)...])
+                    args[key] = val
+                } else {
+                    args[str] = ProcessInfo.processInfo.environment[str] ?? ""
+                }
+            }
+        }
+        return args
     }
 
     private static func parseDependsOn(_ value: Any?) -> [String] {
@@ -275,14 +329,40 @@ public struct ComposeService: Sendable {
 }
 
 /// Build configuration for a compose service.
-public struct ComposeBuild: Sendable {
+public struct ComposeBuild: Sendable, Equatable {
     public var context: String
     public var dockerfile: String?
+    /// Target stage to build (maps to `container build --target <stage>`).
+    public var target: String?
+    /// Build-time ARG values declared under `build.args` in the compose file.
+    public var args: [String: String]
 
-    public init(context: String, dockerfile: String? = nil) {
+    public init(
+        context: String,
+        dockerfile: String? = nil,
+        target: String? = nil,
+        args: [String: String] = [:]
+    ) {
         self.context = context
         self.dockerfile = dockerfile
+        self.target = target
+        self.args = args
     }
+
+    /// Build args formatted as `KEY=VALUE` strings for the `container build --build-arg` flag.
+    public var argList: [String] {
+        args.map { "\($0.key)=\($0.value)" }
+    }
+}
+
+/// How a service's image should be obtained during `compose up`.
+public enum ComposeImageSource: Sendable, Equatable {
+    /// Pull `image` from a registry.
+    case pull(image: String)
+    /// Build from the Dockerfile context and tag the result with `tag`.
+    case build(tag: String, build: ComposeBuild)
+    /// Nothing to do (no image and no build config).
+    case none
 }
 
 /// Network definition in a compose file.

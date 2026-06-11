@@ -136,6 +136,74 @@ struct ComposeFileTests {
         #expect(compose.services["app"]?.build?.dockerfile == "Dockerfile.dev")
     }
 
+    @Test("Parse build.target (issue #14)")
+    func parseBuildTarget() throws {
+        let yaml = """
+        services:
+          app:
+            build:
+              context: .
+              target: base
+        """
+
+        let compose = try ComposeFile.parse(yaml)
+        #expect(compose.services["app"]?.build?.target == "base")
+    }
+
+    @Test("Parse build.args map form")
+    func parseBuildArgsMap() throws {
+        let yaml = """
+        services:
+          app:
+            build:
+              context: .
+              args:
+                REQUIRED_TOKEN: secret
+                BUILD_ENV: prod
+        """
+
+        let compose = try ComposeFile.parse(yaml)
+        let args = compose.services["app"]?.build?.args ?? [:]
+        #expect(args["REQUIRED_TOKEN"] == "secret")
+        #expect(args["BUILD_ENV"] == "prod")
+    }
+
+    @Test("Parse build.args list form, preserving explicit empty value")
+    func parseBuildArgsList() throws {
+        // After variable substitution, `${REQUIRED_TOKEN-}` resolves to an empty
+        // value — the key must still be present with an empty string, not dropped.
+        let yaml = """
+        services:
+          app:
+            build:
+              context: .
+              args:
+                - BUILD_ENV=prod
+                - REQUIRED_TOKEN=
+        """
+
+        let compose = try ComposeFile.parse(yaml)
+        let args = compose.services["app"]?.build?.args ?? [:]
+        #expect(args["BUILD_ENV"] == "prod")
+        #expect(args["REQUIRED_TOKEN"] == "")
+    }
+
+    @Test("Parse service with both image and build (issue #14 comment)")
+    func parseImageAndBuild() throws {
+        let yaml = """
+        services:
+          app:
+            image: repro-app
+            build:
+              context: .
+              target: base
+        """
+
+        let compose = try ComposeFile.parse(yaml)
+        #expect(compose.services["app"]?.image == "repro-app")
+        #expect(compose.services["app"]?.build?.target == "base")
+    }
+
     @Test("findDefault returns nil when no compose file exists in empty directory")
     func findDefaultNoFile() throws {
         let dir = try makeTempDir()

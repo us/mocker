@@ -34,7 +34,15 @@ public actor ComposeOrchestrator {
     }
 
     /// Start all services defined in a compose file.
-    public func up(composeFile: ComposeFile, detach: Bool = false) async throws -> [ComposeEvent] {
+    /// - Parameters:
+    ///   - build: force-build images even if they already exist (compose `--build`).
+    ///   - noBuild: never build, pull `image:` instead (compose `--no-build`).
+    public func up(
+        composeFile: ComposeFile,
+        detach: Bool = false,
+        build: Bool = false,
+        noBuild: Bool = false
+    ) async throws -> [ComposeEvent] {
         var events: [ComposeEvent] = []
 
         // Create networks
@@ -59,7 +67,7 @@ public actor ComposeOrchestrator {
 
         for serviceName in order {
             guard let service = composeFile.services[serviceName] else { continue }
-            let info = try await startService(service, detach: detach)
+            let info = try await startService(service, detach: detach, forceBuild: build, noBuild: noBuild)
             let containerName = "\(projectName)-\(service.name)-1"
             startedContainers.append((serviceName: serviceName, info: info))
             events.append(.containerStarted(containerName))
@@ -193,26 +201,37 @@ public actor ComposeOrchestrator {
         }
     }
 
-    private func startService(_ service: ComposeService, detach: Bool) async throws -> ContainerInfo {
+    private func startService(
+        _ service: ComposeService,
+        detach: Bool,
+        forceBuild: Bool = false,
+        noBuild: Bool = false
+    ) async throws -> ContainerInfo {
         let containerName = "\(projectName)-\(service.name)-1"
 
-        // Pull or build image
-        if let image = service.image {
+        // Decide whether to build or pull. Per the Compose spec, a service with
+        // both `image:` and `build:` is built and tagged with `image:` — not pulled.
+        switch service.resolveImageSource(projectName: projectName, noBuild: noBuild) {
+        case .pull(let image):
             _ = try await imageManager.pull(image)
-        } else if let build = service.build {
-            let tag = "\(projectName)-\(service.name):latest"
-            // Only build if image doesn't already exist (like `docker compose up` without --build)
-            let existingImages = try await imageManager.list()
-            let imageExists = existingImages.contains { img in
-                img.tag == "latest" && img.repository.hasSuffix("\(projectName)-\(service.name)")
+        case .build(let tag, let build):
+            // Skip the rebuild only when `--build` wasn't requested and the image exists.
+            var shouldBuild = forceBuild
+            if !shouldBuild {
+                let existingImages = try await imageManager.list()
+                shouldBuild = !existingImages.contains { ComposeService.imageMatches($0, tag: tag) }
             }
-            if !imageExists {
+            if shouldBuild {
                 _ = try await imageManager.build(
                     tag: tag,
                     context: build.context,
-                    dockerfile: build.dockerfile ?? "Dockerfile"
+                    dockerfile: build.dockerfile ?? "Dockerfile",
+                    buildArgs: build.argList,
+                    target: build.target
                 )
             }
+        case .none:
+            break
         }
 
         let imageName = service.image ?? "\(projectName)-\(service.name):latest"

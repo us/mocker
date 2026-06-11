@@ -224,7 +224,7 @@ struct ComposeUp: AsyncParsableCommand {
         )
 
         let totalResources = composeFile.networks.count + composeFile.volumes.count + composeFile.services.count
-        let events = try await orchestrator.up(composeFile: composeFile, detach: detach)
+        let events = try await orchestrator.up(composeFile: composeFile, detach: detach, build: build, noBuild: noBuild)
         ComposeFormatter.printEvents(events, total: totalResources)
     }
 }
@@ -571,10 +571,12 @@ struct ComposeBuildCommand: AsyncParsableCommand {
             guard let buildConfig = service.build else { continue }
             let tag = service.image ?? "\(name):latest"
             if !quiet { print("Building \(name)...") }
+            // Compose-file `build.args` first, then CLI `--build-arg` so CLI wins on conflict.
             _ = try await manager.build(
                 tag: tag, context: buildConfig.context,
                 dockerfile: buildConfig.dockerfile ?? "Dockerfile",
-                noCache: noCache, buildArgs: buildArg
+                noCache: noCache, buildArgs: buildConfig.argList + buildArg,
+                target: buildConfig.target
             )
             if !quiet { print("Successfully built \(name)") }
         }
@@ -1203,7 +1205,7 @@ struct ComposeCreate: AsyncParsableCommand {
             volumeManager: volumeManager
         )
 
-        let events = try await orchestrator.up(composeFile: composeFile, detach: true)
+        let events = try await orchestrator.up(composeFile: composeFile, detach: true, build: build, noBuild: noBuild)
         ComposeFormatter.printEvents(events, total: events.count)
     }
 }
