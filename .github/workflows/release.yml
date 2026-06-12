@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and publish (e.g. v0.3.2)"
+        required: true
+        type: string
 
 jobs:
   build:
@@ -11,10 +17,14 @@ jobs:
     runs-on: macos-26
     permissions:
       contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
 
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1
@@ -28,7 +38,7 @@ jobs:
 
       - name: Create tarball
         run: |
-          VERSION="${GITHUB_REF_NAME}"
+          VERSION="${RELEASE_TAG}"
           tar -czf "mocker-${VERSION}-arm64-apple-macosx.tar.gz" \
             -C .build/release mocker
           echo "TARBALL=mocker-${VERSION}-arm64-apple-macosx.tar.gz" >> $GITHUB_ENV
@@ -43,6 +53,7 @@ jobs:
       - name: Upload binary to release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: ${{ env.TARBALL }}
 
       - name: Update Homebrew formula
