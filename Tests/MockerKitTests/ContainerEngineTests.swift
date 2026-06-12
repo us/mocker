@@ -144,6 +144,41 @@ struct ContainerEngineTests {
         #expect(args.contains("/path/to/kernel"))
     }
 
+    @Test("Run arguments publish TCP ports natively with -p")
+    func testRunArgumentsPublishTCPPort() {
+        let config = ContainerConfig(
+            image: "nginx:alpine",
+            ports: [PortMapping(hostPort: 18081, containerPort: 80)]
+        )
+
+        let args = ContainerEngine.buildRunArguments(name: "web", config: config)
+
+        let idx = args.firstIndex(of: "-p")
+        #expect(idx != nil)
+        if let idx { #expect(args[idx + 1] == "18081:80/tcp") }
+    }
+
+    @Test("Run arguments publish UDP ports with protocol suffix")
+    func testRunArgumentsPublishUDPPort() {
+        let config = ContainerConfig(
+            image: "coredns",
+            ports: [PortMapping(hostPort: 5353, containerPort: 53, portProtocol: .udp)]
+        )
+
+        let args = ContainerEngine.buildRunArguments(name: "dns", config: config)
+
+        let idx = args.firstIndex(of: "-p")
+        #expect(idx != nil)
+        if let idx { #expect(args[idx + 1] == "5353:53/udp") }
+    }
+
+    @Test("Run arguments omit -p when no ports requested")
+    func testRunArgumentsNoPorts() {
+        let config = ContainerConfig(image: "alpine")
+        let args = ContainerEngine.buildRunArguments(name: "bare", config: config)
+        #expect(!args.contains("-p"))
+    }
+
     @Test("Container CLI resolver prefers Homebrew installation")
     func testContainerCLIResolverPrefersHomebrew() throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())

@@ -20,6 +20,33 @@ struct FlagEnforcementTests {
         #expect(pm.portProtocol == .udp)
     }
 
+    @Test("PortMapping parse with host IP prefix")
+    func testPortMappingWithHostIP() throws {
+        let pm = try PortMapping.parse("127.0.0.1:8080:80")
+        #expect(pm.hostPort == 8080)
+        #expect(pm.containerPort == 80)
+        #expect(pm.portProtocol == .tcp)
+    }
+
+    @Test("PortMapping parse bare container port maps host to same port")
+    func testPortMappingBareContainerPort() throws {
+        let pm = try PortMapping.parse("80")
+        #expect(pm.hostPort == 80)
+        #expect(pm.containerPort == 80)
+
+        let udp = try PortMapping.parse("53/udp")
+        #expect(udp.hostPort == 53)
+        #expect(udp.containerPort == 53)
+        #expect(udp.portProtocol == .udp)
+    }
+
+    @Test("PortMapping parse rejects port ranges")
+    func testPortMappingRejectsRanges() {
+        #expect(throws: MockerError.self) {
+            _ = try PortMapping.parse("8000-8010:9000-9010")
+        }
+    }
+
     @Test("VolumeMount parse bind mount")
     func testVolumeMountBind() throws {
         let vm = try VolumeMount.parse("/host/path:/container/path")

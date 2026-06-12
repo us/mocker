@@ -64,14 +64,10 @@ public actor ContainerEngine {
         let info = try await fetchContainerInfo(id: assignedID, name: name, config: containerConfig)
         try await store.save(info)
 
-        // Start port proxies if -p mappings were requested and we got an IP
-        if !containerConfig.ports.isEmpty, !info.networkAddress.isEmpty {
-            try? await portProxy.start(
-                containerID: info.id,
-                ports: containerConfig.ports,
-                containerIP: info.networkAddress
-            )
-        }
+        // Ports are now published natively by the container runtime (see
+        // buildRunArguments). The legacy user-space PortProxy is no longer started;
+        // portProxy.stop() is still invoked on stop/remove to clean up any proxies
+        // left behind by an older mocker version.
 
         return info
     }
@@ -89,6 +85,14 @@ public actor ContainerEngine {
             if !vol.source.isEmpty {
                 args += ["-v", "\(vol.source):\(vol.destination)\(vol.readOnly ? ":ro" : "")"]
             }
+        }
+
+        // Publish ports natively via the container runtime. Apple's `container run`
+        // supports `-p [host-ip:]host-port:container-port[/protocol]` and wires
+        // host-reachable forwarding through vmnet — this is what actually makes
+        // published ports reachable, for both `mocker run -p` and `compose up`.
+        for port in containerConfig.ports {
+            args += ["-p", "\(port.hostPort):\(port.containerPort)/\(port.portProtocol.rawValue)"]
         }
 
         if let workingDir = containerConfig.workingDir, !workingDir.isEmpty {

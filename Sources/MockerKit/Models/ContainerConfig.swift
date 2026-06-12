@@ -129,20 +129,42 @@ public struct PortMapping: Codable, Sendable, CustomStringConvertible {
         "\(hostPort):\(containerPort)/\(portProtocol.rawValue)"
     }
 
-    /// Parse a port mapping string like "8080:80" or "8080:80/udp".
+    /// Parse a port mapping string. Accepts the common Docker/Compose forms:
+    ///   "80"                      -> same host and container port
+    ///   "8080:80"                 -> explicit host:container
+    ///   "8080:80/udp"             -> with protocol
+    ///   "127.0.0.1:8080:80"       -> host-ip:host:container (the host IP is accepted
+    ///                                but not bound separately; publishing host:container
+    ///                                already reaches localhost)
+    /// Port ranges (e.g. "8000-8010:9000-9010") are not yet supported and throw.
     public static func parse(_ value: String) throws -> PortMapping {
         let parts = value.split(separator: "/")
         let proto: PortProtocol = parts.count > 1 ? (parts[1] == "udp" ? .udp : .tcp) : .tcp
 
         let portParts = parts[0].split(separator: ":")
-        guard portParts.count == 2,
-              let host = UInt16(portParts[0]),
-              let container = UInt16(portParts[1])
-        else {
+        switch portParts.count {
+        case 1:
+            // Bare container port. Docker would assign a random host port; mocker maps
+            // host == container for predictable, scriptable behaviour.
+            guard let port = UInt16(portParts[0]) else {
+                throw MockerError.invalidPortMapping(value)
+            }
+            return PortMapping(hostPort: port, containerPort: port, portProtocol: proto)
+        case 2:
+            guard let host = UInt16(portParts[0]), let container = UInt16(portParts[1]) else {
+                throw MockerError.invalidPortMapping(value)
+            }
+            return PortMapping(hostPort: host, containerPort: container, portProtocol: proto)
+        case 3:
+            // portParts[0] is the host IP (e.g. 127.0.0.1); it is not persisted because
+            // `container run -p host:container` already binds a host-reachable port.
+            guard let host = UInt16(portParts[1]), let container = UInt16(portParts[2]) else {
+                throw MockerError.invalidPortMapping(value)
+            }
+            return PortMapping(hostPort: host, containerPort: container, portProtocol: proto)
+        default:
             throw MockerError.invalidPortMapping(value)
         }
-
-        return PortMapping(hostPort: host, containerPort: container, portProtocol: proto)
     }
 }
 
