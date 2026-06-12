@@ -144,6 +144,22 @@ struct ContainerEngineTests {
         #expect(args.contains("/path/to/kernel"))
     }
 
+    @Test("Run arguments include port mappings as -p flags")
+    func testRunArgumentsIncludePortMappings() throws {
+        let port1 = try PortMapping.parse("8080:80")
+        let port2 = try PortMapping.parse("443:443/tcp")
+        let config = ContainerConfig(
+            image: "nginx:latest",
+            ports: [port1, port2]
+        )
+
+        let args = ContainerEngine.buildRunArguments(name: "port-test", config: config)
+
+        #expect(args.contains("-p"))
+        #expect(args.contains("8080:80/tcp"))
+        #expect(args.contains("443:443/tcp"))
+    }
+
     @Test("Container CLI resolver prefers Homebrew installation")
     func testContainerCLIResolverPrefersHomebrew() throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())

@@ -91,6 +91,10 @@ public actor ContainerEngine {
             }
         }
 
+        for port in containerConfig.ports {
+            args += ["-p", port.description]
+        }
+
         if let workingDir = containerConfig.workingDir, !workingDir.isEmpty {
             args += ["-w", workingDir]
         }
