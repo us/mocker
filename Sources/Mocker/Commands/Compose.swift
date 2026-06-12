@@ -49,21 +49,30 @@ struct ComposeCommand: AsyncParsableCommand {
 // MARK: - Shared Options
 
 struct ComposeOptions: ParsableArguments {
-    @Option(name: [.customShort("f"), .long], help: "Compose file path")
-    var file: String?
+    @Option(name: [.customShort("f"), .long], parsing: .singleValue,
+            help: "Compose file path (repeatable; later files override earlier)")
+    var files: [String] = []
 
     @Option(name: [.customShort("p"), .customLong("project-name")], help: "Project name")
     var projectName: String?
 
     func loadCompose() throws -> (ComposeFile, String) {
-        guard let path = file ?? ComposeFile.findDefault() else {
-            let searched = ComposeFile.defaultFileNames.joined(separator: ", ")
-            throw MockerError.composeFileNotFound("No compose file found. Searched for: \(searched)")
+        let paths: [String]
+        if files.isEmpty {
+            guard let def = ComposeFile.findDefault() else {
+                let searched = ComposeFile.defaultFileNames.joined(separator: ", ")
+                throw MockerError.composeFileNotFound("No compose file found. Searched for: \(searched)")
+            }
+            paths = [def]
+        } else {
+            paths = files
         }
-        let composeFile = try ComposeFile.load(from: path)
 
-        // Derive project name from directory if not specified
-        let project = projectName ?? URL(fileURLWithPath: path)
+        let loaded = try paths.map { try ComposeFile.load(from: $0) }
+        let composeFile = ComposeFile.merge(loaded)
+
+        // Derive project name from the first file's directory if not specified.
+        let project = projectName ?? URL(fileURLWithPath: paths[0])
             .deletingLastPathComponent()
             .lastPathComponent
             .lowercased()

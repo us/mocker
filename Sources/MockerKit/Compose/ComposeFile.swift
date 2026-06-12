@@ -182,6 +182,27 @@ public struct ComposeFile: Sendable {
         let filteredServices = services.filter { included.contains($0.key) }
         return ComposeFile(services: filteredServices, networks: networks, volumes: volumes)
     }
+
+    /// Merge multiple compose files in order, matching `docker compose -f a -f b`
+    /// overlay semantics: later files override earlier ones. A new service is
+    /// inserted; an existing service is field-merged (see `ComposeService.merged`).
+    /// Networks and volumes are unioned with later definitions winning on key
+    /// collision. A single-file input is returned unchanged.
+    public static func merge(_ files: [ComposeFile]) -> ComposeFile {
+        guard var result = files.first else { return ComposeFile() }
+        for overlay in files.dropFirst() {
+            for (name, service) in overlay.services {
+                if let base = result.services[name] {
+                    result.services[name] = base.merged(with: service)
+                } else {
+                    result.services[name] = service
+                }
+            }
+            result.networks.merge(overlay.networks) { _, new in new }
+            result.volumes.merge(overlay.volumes) { _, new in new }
+        }
+        return result
+    }
 }
 
 /// A service definition in a compose file.
@@ -243,6 +264,28 @@ public struct ComposeService: Sendable {
     /// Default tag for an image built from this service's `build` config.
     public func buildTag(projectName: String) -> String {
         image ?? "\(projectName)-\(name):latest"
+    }
+
+    /// Overlay `other` onto `self` (other wins) for `docker compose` multi-file
+    /// merge. Scalars take the later value when present; `environment` and
+    /// `labels` are field-merged (later wins on key collision); list-valued
+    /// fields are replaced by the later file unless it is empty.
+    func merged(with other: ComposeService) -> ComposeService {
+        ComposeService(
+            name: name,
+            image: other.image ?? image,
+            build: other.build ?? build,
+            command: other.command.isEmpty ? command : other.command,
+            environment: environment.merging(other.environment) { _, new in new },
+            ports: other.ports.isEmpty ? ports : other.ports,
+            volumes: other.volumes.isEmpty ? volumes : other.volumes,
+            networks: other.networks.isEmpty ? networks : other.networks,
+            dependsOn: other.dependsOn.isEmpty ? dependsOn : other.dependsOn,
+            restart: other.restart ?? restart,
+            labels: labels.merging(other.labels) { _, new in new },
+            hostname: other.hostname ?? hostname,
+            workingDir: other.workingDir ?? workingDir
+        )
     }
 
     /// Decide how this service's image should be obtained, per the Compose spec.

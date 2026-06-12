@@ -55,4 +55,23 @@ struct MockerCLI: AsyncParsableCommand {
             Proxy.self,
         ]
     )
+
+    /// Custom entry point that preprocesses argv before ArgumentParser sees it.
+    /// Docker-style global compose flags placed before the subcommand
+    /// (`compose -f a.yaml pull`) are relocated to after the subcommand token,
+    /// since ArgumentParser only parses a subcommand's options after that token.
+    /// See `ComposeArgNormalizer`.
+    static func main() async {
+        let argv = ComposeArgNormalizer.reorder(Array(CommandLine.arguments.dropFirst()))
+        do {
+            var command = try parseAsRoot(argv)
+            if var asyncCommand = command as? AsyncParsableCommand {
+                try await asyncCommand.run()
+            } else {
+                try command.run()
+            }
+        } catch {
+            exit(withError: error)
+        }
+    }
 }

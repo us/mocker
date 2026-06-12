@@ -23,6 +23,48 @@ struct ComposeFileTests {
         #expect(compose.services["redis"]?.image == "redis:7")
     }
 
+    @Test("Merge overlays later files over earlier ones")
+    func mergeOverlay() throws {
+        let base = try ComposeFile.parse("""
+        services:
+          web:
+            image: nginx:latest
+            environment:
+              A: "1"
+              B: "1"
+        """)
+        let overlay = try ComposeFile.parse("""
+        services:
+          web:
+            image: nginx:alpine
+            environment:
+              B: "2"
+          db:
+            image: postgres:16
+        """)
+
+        let merged = ComposeFile.merge([base, overlay])
+
+        // Later file wins on scalars; new service is added.
+        #expect(merged.services["web"]?.image == "nginx:alpine")
+        #expect(merged.services["db"]?.image == "postgres:16")
+        // environment is field-merged with later winning on conflict.
+        #expect(merged.services["web"]?.environment["A"] == "1")
+        #expect(merged.services["web"]?.environment["B"] == "2")
+    }
+
+    @Test("Merge of a single file returns it unchanged")
+    func mergeSingle() throws {
+        let only = try ComposeFile.parse("""
+        services:
+          web:
+            image: nginx:latest
+        """)
+        let merged = ComposeFile.merge([only])
+        #expect(merged.services.count == 1)
+        #expect(merged.services["web"]?.image == "nginx:latest")
+    }
+
     @Test("Parse compose with environment as list")
     func parseEnvironmentList() throws {
         let yaml = """

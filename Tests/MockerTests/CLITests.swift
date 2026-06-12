@@ -20,6 +20,19 @@ struct CLITests {
         #expect(command.image == "alpine")
     }
 
+    @Test("Compose subcommand accepts repeated -f flags")
+    func composeRepeatedFile() throws {
+        let command = try ComposePull.parse(["-f", "a.yaml", "-f", "b.yaml"])
+        #expect(command.options.files == ["a.yaml", "b.yaml"])
+    }
+
+    @Test("Compose up parses -f together with a subcommand flag")
+    func composeUpFileAndFlag() throws {
+        let command = try ComposeUp.parse(["-f", "docker-compose.yml", "--detach"])
+        #expect(command.options.files == ["docker-compose.yml"])
+        #expect(command.detach == true)
+    }
+
     @Test("Run command accepts nested virtualization flags")
     func runVirtualizationFlags() throws {
         let command = try Run.parse(["--virtualization", "--kernel", "/tmp/vmlinux", "ubuntu:latest"])
