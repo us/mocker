@@ -1,0 +1,30 @@
+{
+  "architecture": "arm64",
+  "author": "NGINX Docker Maintainers",
+  "config": {
+    "Cmd": [
+      "nginx",
+      "-g",
+      "daemon off;"
+    ],
+    "Env": [
+      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "NGINX_VERSION=1.27.0"
+    ],
+    "Labels": {
+      "maintainer": "NGINX Docker Maintainers <docker-maint@nginx.com>"
+    },
+    "StopSignal": "SIGQUIT",
+    "WorkingDir": "/app"
+  },
+  "created": "2024-11-19T17:01:02.000000000Z",
+  "os": "linux",
+  "rootfs": {
+    "diff_ids": [
+      "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    ],
+    "type": "layers"
+  },
+  "variant": "v8"
+}

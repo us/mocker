@@ -1,0 +1,38 @@
+{
+  "Architecture" : "arm64",
+  "Author" : "NGINX Docker Maintainers",
+  "Config" : {
+    "Cmd" : [
+      "nginx",
+      "-g",
+      "daemon off;"
+    ],
+    "Env" : [
+      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "NGINX_VERSION=1.27.0"
+    ],
+    "Labels" : {
+      "maintainer" : "NGINX Docker Maintainers <docker-maint@nginx.com>"
+    },
+    "StopSignal" : "SIGQUIT",
+    "WorkingDir" : "/app"
+  },
+  "Created" : "2024-11-19T17:01:02.000000000Z",
+  "Id" : "sha256:a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+  "Os" : "linux",
+  "RepoDigests" : [
+    "docker.io/library/nginx@sha256:indexdigest0000000000000000000000000000000000000000000000000000"
+  ],
+  "RepoTags" : [
+    "docker.io/library/nginx:latest"
+  ],
+  "RootFS" : {
+    "Layers" : [
+      "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    ],
+    "Type" : "layers"
+  },
+  "Size" : 4202136,
+  "Variant" : "v8"
+}

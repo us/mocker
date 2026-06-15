@@ -40,7 +40,8 @@ let package = Package(
         // Tests
         .testTarget(
             name: "MockerKitTests",
-            dependencies: ["MockerKit"]
+            dependencies: ["MockerKit"],
+            resources: [.copy("Fixtures")]
         ),
         .testTarget(
             name: "MockerTests",
