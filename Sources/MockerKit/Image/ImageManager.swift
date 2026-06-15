@@ -102,13 +102,46 @@ public actor ImageManager {
 
     // MARK: - Inspect
 
-    /// Inspect an image.
-    public func inspect(_ reference: String) async throws -> ImageInfo {
+    /// Inspect an image reference, returning a Docker-compatible ImageInspect.
+    public func inspect(_ reference: String, platform: String? = nil) async throws -> ImageInspect {
         let normalized = try Self.normalize(reference)
         guard let image = try? await imageStore.get(reference: normalized) else {
             throw MockerError.imageNotFound(reference)
         }
-        return Self.toImageInfo(image)
+        let resolvedPlatform: ContainerizationOCI.Platform
+        if let platformString = platform {
+            resolvedPlatform = try ContainerizationOCI.Platform(from: platformString)
+        } else {
+            resolvedPlatform = ContainerizationOCI.Platform.current
+        }
+
+        let manifest: ContainerizationOCI.Manifest
+        let config: ContainerizationOCI.Image
+        if let matched = try? await image.manifest(for: resolvedPlatform) {
+            manifest = matched
+            config = try await image.config(for: resolvedPlatform)
+        } else {
+            // No exact platform match: a single-arch or sole-manifest image is still
+            // inspectable — Docker returns its only manifest. Multi-manifest indexes
+            // with no match remain a genuine error.
+            let index = try await image.index()
+            guard let sole = Self.soleManifestDescriptor(from: index.manifests) else {
+                throw MockerError.operationFailed(
+                    "platform \(resolvedPlatform.description) not available for image \(reference)")
+            }
+            manifest = try await image.getContent(digest: sole.digest).decode()
+            config = try await image.getContent(digest: manifest.config.digest).decode()
+        }
+        return mapToImageInspect(config: config, manifest: manifest, reference: normalized, indexDigest: image.digest)
+    }
+
+    /// Returns the only manifest descriptor when an index has exactly one, enabling
+    /// single-arch images to be inspected even if their platform differs from the
+    /// requested one. Returns nil for empty or multi-manifest indexes.
+    static func soleManifestDescriptor(
+        from manifests: [ContainerizationOCI.Descriptor]
+    ) -> ContainerizationOCI.Descriptor? {
+        manifests.count == 1 ? manifests.first : nil
     }
 
     // MARK: - Build

@@ -12,11 +12,33 @@ struct Inspect: AsyncParsableCommand {
     @Option(name: .shortAndLong, help: "Format output using a custom template")
     var format: String?
 
-    @Option(name: .long, help: "Only inspect objects of the given type")
+    @Option(name: .long, help: "Only inspect objects of the given type (image or container)")
     var type: String?
+
+    @Option(name: .long, help: "Inspect a specific platform of a multi-platform image")
+    var platform: String?
 
     @Flag(name: .shortAndLong, help: "Display total file sizes if the type is container")
     var size = false
+
+    /// The resolved inspection target derived from `--type`.
+    enum Kind: Equatable {
+        case image
+        case container
+        case auto
+    }
+
+    /// Single source of truth mapping the `--type` flag to an inspection target.
+    /// Pure and injectable so routing can be unit-tested without runtime state.
+    static func resolveKind(type: String?) -> Kind {
+        switch type {
+        case "image": return .image
+        case "container": return .container
+        default: return .auto
+        }
+    }
+
+    // MARK: - Run
 
     func run() async throws {
         let config = MockerConfig()
@@ -25,14 +47,33 @@ struct Inspect: AsyncParsableCommand {
         let engine = try ContainerEngine(config: config)
         let imageManager = try ImageManager(config: config)
 
-        for target in targets {
-            // Try container first, then image
-            if let container = try? await engine.inspect(target) {
+        switch Self.resolveKind(type: type) {
+        case .image:
+            var results: [MockerKit.ImageInspect] = []
+            for target in targets {
+                let info = try await imageManager.inspect(target, platform: platform)
+                results.append(info)
+            }
+            try TableFormatter.printJSONArray(results, escapeSlashes: false)
+
+        case .container:
+            for target in targets {
+                guard let container = try? await engine.inspect(target) else {
+                    throw MockerError.containerNotFound(target)
+                }
                 try TableFormatter.printJSONArray(container)
-            } else if let image = try? await imageManager.inspect(target) {
-                try TableFormatter.printJSONArray(image)
-            } else {
-                throw MockerError.containerNotFound(target)
+            }
+
+        case .auto:
+            // Container-first fallback when --type is not specified
+            for target in targets {
+                if let container = try? await engine.inspect(target) {
+                    try TableFormatter.printJSONArray(container)
+                } else if let image = try? await imageManager.inspect(target) {
+                    try TableFormatter.printJSONArray(image, escapeSlashes: false)
+                } else {
+                    throw MockerError.containerNotFound(target)
+                }
             }
         }
     }

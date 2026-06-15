@@ -30,11 +30,26 @@ enum TableFormatter {
     }
 
     /// Format a JSON-encodable value as pretty-printed JSON array (Docker inspect format).
-    static func printJSONArray<T: Encodable>(_ value: T) throws {
+    /// Wraps the single value in an array — identical output to `printJSONArray([value])`.
+    ///
+    /// - Parameter escapeSlashes: when `false`, emits `/` unescaped to match Docker's
+    ///   image inspect output. Defaults to `true` to preserve existing behavior.
+    static func printJSONArray<T: Encodable>(_ value: T, escapeSlashes: Bool = true) throws {
+        try printJSONArray([value], escapeSlashes: escapeSlashes)
+    }
+
+    /// Format a collection of JSON-encodable values as one pretty-printed JSON array.
+    /// Preserves input order. Required for multi-ref inspect to emit one `[…]` array.
+    ///
+    /// - Parameter escapeSlashes: when `false`, emits `/` unescaped to match Docker's
+    ///   image inspect output. Defaults to `true` to preserve existing behavior.
+    static func printJSONArray<T: Encodable>(_ values: [T], escapeSlashes: Bool = true) throws {
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        var formatting: JSONEncoder.OutputFormatting = [.prettyPrinted, .sortedKeys]
+        if !escapeSlashes { formatting.insert(.withoutEscapingSlashes) }
+        encoder.outputFormatting = formatting
         encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode([value])
+        let data = try encoder.encode(values)
         if let json = String(data: data, encoding: .utf8) {
             Swift.print(json)
         }

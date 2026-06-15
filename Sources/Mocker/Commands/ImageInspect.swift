@@ -1,6 +1,5 @@
 import ArgumentParser
 import MockerKit
-import Foundation
 
 struct ImageInspect: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
@@ -17,16 +16,15 @@ struct ImageInspect: AsyncParsableCommand {
     @Option(name: .long, help: "Inspect a specific platform of the multi-platform image")
     var platform: String?
 
-    func run() async throws {
-        let config = MockerConfig()
-        let manager = try ImageManager(config: config)
+    // MARK: - Run
 
+    func run() async throws {
+        let manager = try ImageManager(config: MockerConfig())
+        var results: [MockerKit.ImageInspect] = []
         for image in images {
-            let info = try await manager.inspect(image)
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(info)
-            print(String(data: data, encoding: .utf8) ?? "")
+            let info = try await manager.inspect(image, platform: platform)
+            results.append(info)
         }
+        try TableFormatter.printJSONArray(results, escapeSlashes: false)
     }
 }
