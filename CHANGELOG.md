@@ -5,6 +5,13 @@ All notable changes to Mocker are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### ⚠ BREAKING CHANGES
+
+* **image inspect:** `mocker image inspect` and `mocker inspect --type=image` now return Docker-compatible `ImageInspect` JSON arrays with PascalCase keys instead of the previous lowercase `ImageInfo` object shape.
+* **MockerKit:** `ImageManager.inspect(_:platform:)` returns `ImageInspect` instead of `ImageInfo`.
+
 ## [0.3.2](https://github.com/us/mocker/compare/v0.3.1...v0.3.2) (2026-06-11)
 
 

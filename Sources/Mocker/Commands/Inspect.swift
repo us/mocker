@@ -1,6 +1,11 @@
 import ArgumentParser
 import MockerKit
 
+enum InspectObjectType: String, ExpressibleByArgument {
+    case image
+    case container
+}
+
 struct Inspect: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Return low-level information on container or image"
@@ -13,7 +18,7 @@ struct Inspect: AsyncParsableCommand {
     var format: String?
 
     @Option(name: .long, help: "Only inspect objects of the given type (image or container)")
-    var type: String?
+    var type: InspectObjectType?
 
     @Option(name: .long, help: "Inspect a specific platform of a multi-platform image")
     var platform: String?
@@ -30,11 +35,11 @@ struct Inspect: AsyncParsableCommand {
 
     /// Single source of truth mapping the `--type` flag to an inspection target.
     /// Pure and injectable so routing can be unit-tested without runtime state.
-    static func resolveKind(type: String?) -> Kind {
+    static func resolveKind(type: InspectObjectType?) -> Kind {
         switch type {
-        case "image": return .image
-        case "container": return .container
-        default: return .auto
+        case .image: return .image
+        case .container: return .container
+        case nil: return .auto
         }
     }
 
@@ -69,10 +74,16 @@ struct Inspect: AsyncParsableCommand {
             for target in targets {
                 if let container = try? await engine.inspect(target) {
                     try TableFormatter.printJSONArray(container)
-                } else if let image = try? await imageManager.inspect(target) {
-                    try TableFormatter.printJSONArray(image, escapeSlashes: false)
                 } else {
-                    throw MockerError.containerNotFound(target)
+                    do {
+                        let image = try await imageManager.inspect(target, platform: platform)
+                        try TableFormatter.printJSONArray(image, escapeSlashes: false)
+                    } catch {
+                        if platform != nil {
+                            throw error
+                        }
+                        throw MockerError.containerNotFound(target)
+                    }
                 }
             }
         }

@@ -36,6 +36,34 @@ public struct ImageInspect: Codable, Sendable {
     /// Always emitted; an empty object `{}` for config-less images (Docker parity).
     public let config: ImageInspectConfig
     public let rootFS: ImageInspectRootFS
+
+    public init(
+        id: String,
+        repoTags: [String],
+        repoDigests: [String],
+        created: String? = nil,
+        author: String? = nil,
+        architecture: String,
+        variant: String? = nil,
+        os: String,
+        osVersion: String? = nil,
+        size: Int64,
+        config: ImageInspectConfig,
+        rootFS: ImageInspectRootFS
+    ) {
+        self.id = id
+        self.repoTags = repoTags
+        self.repoDigests = repoDigests
+        self.created = created
+        self.author = author
+        self.architecture = architecture
+        self.variant = variant
+        self.os = os
+        self.osVersion = osVersion
+        self.size = size
+        self.config = config
+        self.rootFS = rootFS
+    }
 }
 
 /// Docker-compatible Config sub-object. All fields are optional; absent fields are omitted.
@@ -44,8 +72,10 @@ public struct ImageInspectConfig: Codable, Sendable {
     enum CodingKeys: String, CodingKey {
         case user = "User"
         case env = "Env"
+        case exposedPorts = "ExposedPorts"
         case entrypoint = "Entrypoint"
         case cmd = "Cmd"
+        case volumes = "Volumes"
         case workingDir = "WorkingDir"
         case labels = "Labels"
         case stopSignal = "StopSignal"
@@ -53,8 +83,10 @@ public struct ImageInspectConfig: Codable, Sendable {
 
     public let user: String?
     public let env: [String]?
+    public let exposedPorts: [String: ImageInspectEmptyObject]?
     public let entrypoint: [String]?
     public let cmd: [String]?
+    public let volumes: [String: ImageInspectEmptyObject]?
     public let workingDir: String?
     public let labels: [String: String]?
     public let stopSignal: String?
@@ -62,19 +94,42 @@ public struct ImageInspectConfig: Codable, Sendable {
     public init(
         user: String? = nil,
         env: [String]? = nil,
+        exposedPorts: [String: ImageInspectEmptyObject]? = nil,
         entrypoint: [String]? = nil,
         cmd: [String]? = nil,
+        volumes: [String: ImageInspectEmptyObject]? = nil,
         workingDir: String? = nil,
         labels: [String: String]? = nil,
         stopSignal: String? = nil
     ) {
         self.user = user
         self.env = env
+        self.exposedPorts = exposedPorts
         self.entrypoint = entrypoint
         self.cmd = cmd
+        self.volumes = volumes
         self.workingDir = workingDir
         self.labels = labels
         self.stopSignal = stopSignal
+    }
+}
+
+/// Encodes Docker's map[string]struct{} values, for example `"80/tcp": {}`.
+public struct ImageInspectEmptyObject: Codable, Sendable, Equatable {
+    public init() {}
+}
+
+/// Extra config fields not currently surfaced by ContainerizationOCI.ImageConfig.
+public struct ImageInspectConfigExtras: Codable, Sendable, Equatable {
+    public let exposedPorts: [String: ImageInspectEmptyObject]?
+    public let volumes: [String: ImageInspectEmptyObject]?
+
+    public init(
+        exposedPorts: [String: ImageInspectEmptyObject]? = nil,
+        volumes: [String: ImageInspectEmptyObject]? = nil
+    ) {
+        self.exposedPorts = exposedPorts
+        self.volumes = volumes
     }
 }
 
@@ -88,6 +143,11 @@ public struct ImageInspectRootFS: Codable, Sendable {
     public let type: String
     /// Equals OCI config rootfs.diff_ids.
     public let layers: [String]
+
+    public init(type: String, layers: [String]) {
+        self.type = type
+        self.layers = layers
+    }
 }
 
 // MARK: - Pure Mapping Function
@@ -99,34 +159,48 @@ public struct ImageInspectRootFS: Codable, Sendable {
 ///   - manifest: Decoded OCI image manifest for the resolved platform.
 ///   - reference: Fully-qualified image reference (e.g. `docker.io/library/nginx:latest`).
 ///   - indexDigest: Index (multi-arch) digest used for `RepoDigests` (`image.digest`).
+///   - configExtras: Config fields decoded from the raw OCI config JSON but not exposed
+///     by `ContainerizationOCI.ImageConfig`.
+///   - overrideRepoTags: Local image-store tags to report. When absent, derived from
+///     `reference` for compatibility with pure mapping tests.
+///   - overrideRepoDigests: Local image-store repo digests to report. When absent,
+///     derived from `reference` for compatibility with pure mapping tests.
 /// - Returns: A populated `ImageInspect` ready for JSON serialisation.
 public func mapToImageInspect(
     config: ContainerizationOCI.Image,
     manifest: ContainerizationOCI.Manifest,
     reference: String,
-    indexDigest: String
+    indexDigest: String,
+    configExtras: ImageInspectConfigExtras? = nil,
+    repoTags overrideRepoTags: [String]? = nil,
+    repoDigests overrideRepoDigests: [String]? = nil
 ) -> ImageInspect {
     // Id is the config blob digest, not the index digest — Docker parity for single-platform inspect.
     let id = manifest.config.digest
 
     let size = manifest.layers.reduce(0) { $0 + $1.size } + manifest.config.size
 
-    let repoTags = extractRepoTags(from: reference)
+    let repoTags = overrideRepoTags ?? extractRepoTags(from: reference)
     let repo = extractRepo(from: reference)
-    let repoDigests = ["\(repo)@\(indexDigest)"]
+    let repoDigests = overrideRepoDigests ?? ["\(repo)@\(indexDigest)"]
 
     // Docker always emits Config; fall back to an empty object for config-less images.
     let inspectConfig = config.config.map { ociConfig in
         ImageInspectConfig(
             user: ociConfig.user,
             env: ociConfig.env,
+            exposedPorts: configExtras?.exposedPorts,
             entrypoint: ociConfig.entrypoint,
             cmd: ociConfig.cmd,
+            volumes: configExtras?.volumes,
             workingDir: ociConfig.workingDir,
             labels: ociConfig.labels,
             stopSignal: ociConfig.stopSignal
         )
-    } ?? ImageInspectConfig()
+    } ?? ImageInspectConfig(
+        exposedPorts: configExtras?.exposedPorts,
+        volumes: configExtras?.volumes
+    )
 
     let rootFS = ImageInspectRootFS(
         type: "layers",
@@ -146,6 +220,28 @@ public func mapToImageInspect(
         size: size,
         config: inspectConfig,
         rootFS: rootFS
+    )
+}
+
+func decodeImageInspectConfigExtras(from data: Data) throws -> ImageInspectConfigExtras {
+    struct RawImageConfig: Decodable {
+        struct RawConfig: Decodable {
+            enum CodingKeys: String, CodingKey {
+                case exposedPorts = "ExposedPorts"
+                case volumes = "Volumes"
+            }
+
+            let exposedPorts: [String: ImageInspectEmptyObject]?
+            let volumes: [String: ImageInspectEmptyObject]?
+        }
+
+        let config: RawConfig?
+    }
+
+    let raw = try JSONDecoder().decode(RawImageConfig.self, from: data)
+    return ImageInspectConfigExtras(
+        exposedPorts: raw.config?.exposedPorts,
+        volumes: raw.config?.volumes
     )
 }
 

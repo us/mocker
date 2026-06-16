@@ -329,8 +329,13 @@ mocker inspect [OPTIONS] NAME|ID [NAME|ID...]
 | Flag | Short | Description |
 |------|-------|-------------|
 | `--format` | `-f` | Format output using a custom template |
-| `--type` | | Only inspect objects of the given type |
+| `--type` | | Only inspect objects of the given type (`image` or `container`) |
+| `--platform` | | Inspect a specific image platform (for example `linux/amd64`) |
 | `--size` | `-s` | Display total file sizes if type is container |
+
+Image targets return Docker-compatible `ImageInspect` JSON arrays with PascalCase
+fields. `mocker inspect --type image IMAGE` and `mocker image inspect IMAGE`
+return the same image output.
 
 ### `mocker stats`
 
@@ -1330,7 +1335,13 @@ Remove all stopped containers.
 
 ### `mocker image inspect`
 
-Display detailed information on one or more images.
+Display Docker-compatible detailed information on one or more images.
+
+```
+mocker image inspect [OPTIONS] IMAGE [IMAGE...]
+```
+
+Always returns a JSON array using Docker `ImageInspect` field names.
 
 | Flag | Short | Description |
 |------|-------|-------------|

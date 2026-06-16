@@ -239,8 +239,12 @@ emulation is a workaround until upstream lands.
 # Inspect container (JSON output)
 mocker inspect myapp
 
-# Inspect multiple targets
+# Inspect multiple targets, or constrain discovery by type
 mocker inspect container1 container2 alpine:latest
+mocker inspect --type image alpine:latest
+
+# Docker-compatible ImageInspect JSON array; select a platform when needed
+mocker image inspect --platform linux/amd64 alpine:latest
 
 # Resource usage stats
 mocker stats --no-stream

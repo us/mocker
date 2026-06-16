@@ -117,9 +117,12 @@ public actor ImageManager {
 
         let manifest: ContainerizationOCI.Manifest
         let config: ContainerizationOCI.Image
+        let configExtras: ImageInspectConfigExtras
         if let matched = try? await image.manifest(for: resolvedPlatform) {
             manifest = matched
-            config = try await image.config(for: resolvedPlatform)
+            let configContent = try await image.getContent(digest: matched.config.digest)
+            config = try configContent.decode()
+            configExtras = try decodeImageInspectConfigExtras(from: configContent.data())
         } else {
             // No exact platform match: a single-arch or sole-manifest image is still
             // inspectable — Docker returns its only manifest. Multi-manifest indexes
@@ -130,9 +133,73 @@ public actor ImageManager {
                     "platform \(resolvedPlatform.description) not available for image \(reference)")
             }
             manifest = try await image.getContent(digest: sole.digest).decode()
-            config = try await image.getContent(digest: manifest.config.digest).decode()
+            let configContent = try await image.getContent(digest: manifest.config.digest)
+            config = try configContent.decode()
+            configExtras = try decodeImageInspectConfigExtras(from: configContent.data())
         }
-        return mapToImageInspect(config: config, manifest: manifest, reference: normalized, indexDigest: image.digest)
+        let repoMetadata = await repoMetadata(for: image, fallbackReference: normalized)
+        return mapToImageInspect(
+            config: config,
+            manifest: manifest,
+            reference: normalized,
+            indexDigest: image.digest,
+            configExtras: configExtras,
+            repoTags: repoMetadata.tags,
+            repoDigests: repoMetadata.digests
+        )
+    }
+
+    private func repoMetadata(
+        for image: Containerization.Image,
+        fallbackReference: String
+    ) async -> (tags: [String], digests: [String]) {
+        let images = (try? await imageStore.list()) ?? [image]
+        return Self.repoMetadata(for: image, localImages: images, fallbackReference: fallbackReference)
+    }
+
+    static func repoMetadata(
+        for image: Containerization.Image,
+        localImages images: [Containerization.Image],
+        fallbackReference: String
+    ) -> (tags: [String], digests: [String]) {
+        let matchingReferences = images
+            .filter { $0.digest == image.digest }
+            .map(\.reference)
+            .sorted()
+        let references = matchingReferences.isEmpty ? [image.reference, fallbackReference] : matchingReferences
+
+        let tags = Set(references.compactMap(Self.repoTag(from:))).sorted()
+        // Containerization exposes local references and the image's root descriptor digest,
+        // but not a registry-provided list of repo digest aliases. Report only repos found
+        // in local references that point at this exact stored descriptor.
+        let digests = Set(references.map { "\(Self.repositoryName(from: $0))@\(image.digest)" })
+            .sorted()
+
+        return (tags, digests)
+    }
+
+    private static func referenceHasTag(_ reference: String) -> Bool {
+        let beforeDigest = reference.split(separator: "@", maxSplits: 1).first.map(String.init) ?? reference
+        let lastComponent = beforeDigest
+            .split(separator: "/", omittingEmptySubsequences: false)
+            .last
+            .map(String.init) ?? beforeDigest
+        return lastComponent.contains(":")
+    }
+
+    private static func repoTag(from reference: String) -> String? {
+        let beforeDigest = reference.split(separator: "@", maxSplits: 1).first.map(String.init) ?? reference
+        return referenceHasTag(beforeDigest) ? beforeDigest : nil
+    }
+
+    private static func repositoryName(from reference: String) -> String {
+        let withoutDigest = reference.split(separator: "@", maxSplits: 1).first.map(String.init) ?? reference
+        var parts = withoutDigest.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        if var last = parts.last, let colonIndex = last.lastIndex(of: ":") {
+            last = String(last[last.startIndex..<colonIndex])
+            parts[parts.count - 1] = last
+        }
+        return parts.joined(separator: "/")
     }
 
     /// Returns the only manifest descriptor when an index has exactly one, enabling
@@ -298,4 +365,3 @@ public actor ImageManager {
         )
     }
 }
-

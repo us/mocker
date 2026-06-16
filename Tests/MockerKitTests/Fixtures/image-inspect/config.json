@@ -11,10 +11,18 @@
       "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
       "NGINX_VERSION=1.27.0"
     ],
+    "ExposedPorts": {
+      "443/tcp": {},
+      "80/tcp": {}
+    },
     "Labels": {
       "maintainer": "NGINX Docker Maintainers <docker-maint@nginx.com>"
     },
     "StopSignal": "SIGQUIT",
+    "Volumes": {
+      "/var/cache/nginx": {},
+      "/var/log/nginx": {}
+    },
     "WorkingDir": "/app"
   },
   "created": "2024-11-19T17:01:02.000000000Z",

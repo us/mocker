@@ -18,6 +18,7 @@ Mocker 所有命令和参数的完整参考文档。
   - [pull](#pull)
   - [push](#push)
   - [images](#images)
+  - [image inspect](#image-inspect)
   - [build](#build)
   - [tag](#tag)
   - [rmi](#rmi)
@@ -266,10 +267,21 @@ mocker logs --tail 100 myapp
 返回容器或镜像的底层详细信息。
 
 ```
-mocker inspect 目标 [目标...]
+mocker inspect [选项] 目标 [目标...]
 ```
 
 返回 JSON 数组，自动识别目标是容器还是镜像。
+
+**选项：**
+
+| 参数 | 说明 |
+|------|------|
+| `--type` | 只检查指定类型：`image` 或 `container` |
+| `--platform` | 检查指定镜像平台，例如 `linux/amd64` |
+
+镜像检查输出为 Docker 兼容的 `ImageInspect` JSON 数组，字段使用
+PascalCase。`mocker inspect --type image 镜像` 和
+`mocker image inspect 镜像` 返回相同的镜像输出。
 
 **示例：**
 
@@ -285,6 +297,9 @@ mocker inspect myapp postgres:15
 
 # 配合 jq 使用
 mocker inspect myapp | jq '.[0].state'
+
+# 检查指定平台的镜像
+mocker inspect --type image --platform linux/amd64 alpine:latest
 ```
 
 **输出格式：**
@@ -410,6 +425,31 @@ mocker images -q
 
 # 删除所有镜像（谨慎使用）
 mocker rmi $(mocker images -q)
+```
+
+---
+
+### image inspect
+
+显示一个或多个镜像的 Docker 兼容详细信息。
+
+```
+mocker image inspect [选项] 镜像 [镜像...]
+```
+
+始终返回使用 Docker `ImageInspect` 字段名的 JSON 数组。
+
+**选项：**
+
+| 参数 | 说明 |
+|------|------|
+| `--platform` | 检查多平台镜像的指定平台 |
+
+**示例：**
+
+```bash
+mocker image inspect alpine:latest
+mocker image inspect --platform linux/amd64 alpine:latest
 ```
 
 ---

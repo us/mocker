@@ -183,16 +183,27 @@ mocker logs --tail 100 myapp
 Return low-level information on containers or images.
 
 ```bash
-mocker inspect TARGET [TARGET...]
+mocker inspect [OPTIONS] TARGET [TARGET...]
 ```
 
 Always returns a JSON array, even for a single target.
+
+**Flags:**
+```
+--type       Only inspect objects of this type (image|container)
+--platform   Inspect a specific image platform (for example linux/amd64)
+```
+
+Image inspection uses Docker-compatible `ImageInspect` JSON arrays with
+PascalCase fields. `mocker inspect --type image IMAGE` and
+`mocker image inspect IMAGE` return the same image output.
 
 **Examples:**
 ```bash
 mocker inspect myapp
 mocker inspect alpine:latest
 mocker inspect myapp | jq '.[0].state'
+mocker inspect --type image --platform linux/amd64 alpine:latest
 ```
 
 ---
@@ -272,6 +283,29 @@ mocker images [OPTIONS]
 mocker images
 mocker images -q
 mocker rmi $(mocker images -q)
+```
+
+---
+
+### `mocker image inspect`
+
+Display Docker-compatible details for one or more images.
+
+```bash
+mocker image inspect [OPTIONS] IMAGE [IMAGE...]
+```
+
+Always returns a JSON array using Docker `ImageInspect` field names.
+
+**Flags:**
+```
+--platform   Inspect a specific platform of a multi-platform image
+```
+
+**Examples:**
+```bash
+mocker image inspect alpine:latest
+mocker image inspect --platform linux/amd64 alpine:latest
 ```
 
 ---

@@ -22,11 +22,20 @@ private func decodeConfig() throws -> ContainerizationOCI.Image {
     return try JSONDecoder().decode(ContainerizationOCI.Image.self, from: data)
 }
 
+private func decodeConfigExtras() throws -> ImageInspectConfigExtras {
+    try decodeImageInspectConfigExtras(from: loadFixture("config.json"))
+}
+
 private func makeEncoder() -> JSONEncoder {
     let encoder = JSONEncoder()
     // Mirror the image-inspect CLI path, which emits slashes unescaped (Docker parity).
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
     return encoder
+}
+
+private func withoutSingleTrailingNewline(_ string: String) -> String {
+    guard string.hasSuffix("\n") else { return string }
+    return String(string.dropLast())
 }
 
 // MARK: - Test Suite
@@ -49,14 +58,15 @@ struct ImageInspectMappingTests {
             config: config,
             manifest: manifest,
             reference: taggedReference,
-            indexDigest: indexDigest
+            indexDigest: indexDigest,
+            configExtras: try decodeConfigExtras()
         )
 
         let encoded = try makeEncoder().encode(result)
 
         // Normalize both to comparable strings for a legible diff on failure
         let resultString = String(decoding: encoded, as: UTF8.self)
-        let expectedString = String(decoding: expected, as: UTF8.self)
+        let expectedString = withoutSingleTrailingNewline(String(decoding: expected, as: UTF8.self))
         #expect(resultString == expectedString)
     }
 
@@ -140,6 +150,25 @@ struct ImageInspectMappingTests {
         #expect(result.repoTags == [])
     }
 
+    @Test("Explicit local repo metadata overrides reference-derived fallback")
+    func explicitRepoMetadataOverridesFallback() throws {
+        let manifest = try decodeManifest()
+        let config = try decodeConfig()
+        let localDigest = "sha256:localdigest000000000000000000000000000000000000000000000000000"
+
+        let result = mapToImageInspect(
+            config: config,
+            manifest: manifest,
+            reference: "docker.io/library/not-the-local-alias:latest",
+            indexDigest: indexDigest,
+            repoTags: ["registry.example.com/prod/nginx:stable"],
+            repoDigests: ["registry.example.com/prod/nginx@\(localDigest)"]
+        )
+
+        #expect(result.repoTags == ["registry.example.com/prod/nginx:stable"])
+        #expect(result.repoDigests == ["registry.example.com/prod/nginx@\(localDigest)"])
+    }
+
     /// 2.4 — Created must pass through as-is (RFC3339Nano string, not Double, not reformatted).
     @Test("Created is serialized as raw RFC3339Nano string, not a number")
     func createdPassThrough() throws {
@@ -210,7 +239,8 @@ struct ImageInspectMappingTests {
             config: config,
             manifest: manifest,
             reference: taggedReference,
-            indexDigest: indexDigest
+            indexDigest: indexDigest,
+            configExtras: try decodeConfigExtras()
         )
 
         let cfg = result.config
@@ -219,17 +249,64 @@ struct ImageInspectMappingTests {
             "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             "NGINX_VERSION=1.27.0",
         ])
+        #expect(cfg.exposedPorts == [
+            "443/tcp": ImageInspectEmptyObject(),
+            "80/tcp": ImageInspectEmptyObject(),
+        ])
         #expect(cfg.workingDir == "/app")
         #expect(cfg.stopSignal == "SIGQUIT")
         #expect(cfg.labels == ["maintainer": "NGINX Docker Maintainers <docker-maint@nginx.com>"])
+        #expect(cfg.volumes == [
+            "/var/cache/nginx": ImageInspectEmptyObject(),
+            "/var/log/nginx": ImageInspectEmptyObject(),
+        ])
         // Encoded keys must be PascalCase
         let encoded = try makeEncoder().encode(result)
         let json = String(decoding: encoded, as: UTF8.self)
         #expect(json.contains("\"Cmd\""))
         #expect(json.contains("\"Env\""))
+        #expect(json.contains("\"ExposedPorts\""))
         #expect(json.contains("\"WorkingDir\""))
         #expect(json.contains("\"StopSignal\""))
         #expect(json.contains("\"Labels\""))
+        #expect(json.contains("\"Volumes\""))
+    }
+
+    /// Current ContainerizationOCI.ImageConfig does not expose Docker's map[string]struct{}
+    /// config metadata. The raw fixture still contains it; callers must pass decoded extras
+    /// until the upstream model surfaces these fields directly.
+    @Test("Raw config extras preserve ExposedPorts and Volumes omitted by ContainerizationOCI")
+    func rawConfigExtrasPreserveDockerMetadata() throws {
+        let manifest = try decodeManifest()
+        let config = try decodeConfig()
+
+        let withoutExtras = mapToImageInspect(
+            config: config,
+            manifest: manifest,
+            reference: taggedReference,
+            indexDigest: indexDigest
+        )
+
+        #expect(withoutExtras.config.exposedPorts == nil)
+        #expect(withoutExtras.config.volumes == nil)
+
+        let extras = try decodeConfigExtras()
+        let withExtras = mapToImageInspect(
+            config: config,
+            manifest: manifest,
+            reference: taggedReference,
+            indexDigest: indexDigest,
+            configExtras: extras
+        )
+
+        #expect(withExtras.config.exposedPorts == [
+            "443/tcp": ImageInspectEmptyObject(),
+            "80/tcp": ImageInspectEmptyObject(),
+        ])
+        #expect(withExtras.config.volumes == [
+            "/var/cache/nginx": ImageInspectEmptyObject(),
+            "/var/log/nginx": ImageInspectEmptyObject(),
+        ])
     }
 
     /// 2.8 — Config is always emitted; a config-less image yields `"Config": {}` (Docker parity).

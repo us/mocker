@@ -181,8 +181,12 @@ mocker push my-registry.io/myapp:latest
 # 检查容器（JSON 输出）
 mocker inspect myapp
 
-# 同时检查多个对象
+# 同时检查多个对象，或按类型限定
 mocker inspect container1 container2 alpine:latest
+mocker inspect --type image alpine:latest
+
+# Docker 兼容的 ImageInspect JSON 数组；需要时指定平台
+mocker image inspect --platform linux/amd64 alpine:latest
 
 # 资源使用统计
 mocker stats --no-stream
