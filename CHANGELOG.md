@@ -12,6 +12,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **image inspect:** `mocker image inspect` and `mocker inspect --type=image` now return Docker-compatible `ImageInspect` JSON arrays with PascalCase keys instead of the previous lowercase `ImageInfo` object shape.
 * **MockerKit:** `ImageManager.inspect(_:platform:)` returns `ImageInspect` instead of `ImageInfo`.
 
+## [0.4.0](https://github.com/us/mocker/compare/v0.3.2...v0.4.0) (2026-06-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* image inspect output now uses the Docker ImageInspect shape — a JSON array of objects with PascalCase keys (Id, RepoTags, Created, Size, Config, RootFS, ...) instead of a single object with lowercase keys (id, repository, tag, size, created, labels). The Id field now reports the image config digest (Docker parity) rather than the index digest, so it differs from 'mocker images'. MockerKit consumers: ImageManager.inspect(_:) now returns ImageInspect (was ImageInfo) and takes an optional platform: argument.
+
+### Bug Fixes
+
+* add Docker-compatible ImageInspect model and mapping ([aa318d5](https://github.com/us/mocker/commit/aa318d538cf7b7128ccb8b5cb12487971914c9d9))
+* address image inspect review feedback ([8c6c5ec](https://github.com/us/mocker/commit/8c6c5ec3af2df20366b81eeefa84f53b87df7c3c))
+* **compose:** forward published ports ([#19](https://github.com/us/mocker/issues/19)) and accept -f before subcommand ([#21](https://github.com/us/mocker/issues/21)) ([#22](https://github.com/us/mocker/issues/22)) ([5255e50](https://github.com/us/mocker/commit/5255e503044246c80d6076f008f2dc4ac6d0e323))
+* make image inspect Docker-compatible and honor --type ([2b80af3](https://github.com/us/mocker/commit/2b80af3862298a5f66dfa5332b88f4b62f673772))
+
 ## [0.3.2](https://github.com/us/mocker/compare/v0.3.1...v0.3.2) (2026-06-11)
 
 

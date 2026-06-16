@@ -9,7 +9,7 @@ struct CLITests {
         let version = Version.currentVersion
         #expect(!version.isEmpty)
         // x-release-please-start-version
-        #expect(version == "0.3.2")
+        #expect(version == "0.4.0")
         // x-release-please-end
     }
 
