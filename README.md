@@ -40,6 +40,13 @@ Your existing `docker-compose.yml` works as-is.
 
 ## What's New
 
+### v0.4.0 — Docker-compatible image inspect
+- **Docker-compatible `ImageInspect` output** — `mocker image inspect` and `mocker inspect --type image` now emit the same Docker-shaped JSON array with PascalCase keys.
+- **Real image metadata** — image inspect now reads OCI manifest/config data for `Size`, `Created`, `Architecture`, `Os`, `Config`, `RootFS`, repo tags, and repo digests instead of returning stubbed values.
+- **Inspect routing fixes** — `mocker inspect --type image|container` now validates type values, and `--platform` is honored for image inspection.
+- **Compose fixes** — published ports are forwarded correctly and `compose -f ... up` works when `-f` appears before the subcommand.
+- **BREAKING**: image inspect output changed from the old lowercase `ImageInfo` object shape to Docker-compatible `ImageInspect` arrays; `MockerKit.ImageManager.inspect(_:platform:)` now returns `ImageInspect`.
+
 ### v0.3.0 — Multi-arch images
 - **`mocker manifest`** subcommand group — `create`, `inspect`, `add`, `rm`, `annotate`, `push` for assembling and publishing OCI image indexes (multi-arch manifest lists). Pure-Swift via Containerization, no skopeo required (closes #9, #11)
 - **Multi-platform builds** — `mocker build --platform linux/amd64 --platform linux/arm64 -t img:tag .` produces a single multi-arch image

@@ -37,6 +37,13 @@ mocker exec -it my-app sh
 
 ## 最新更新
 
+### v0.4.0 — Docker 兼容的镜像检查
+- **Docker 兼容的 `ImageInspect` 输出** — `mocker image inspect` 和 `mocker inspect --type image` 现在输出相同的 Docker 风格 JSON 数组，并使用 PascalCase 字段名。
+- **真实镜像元数据** — 镜像检查会读取 OCI manifest/config 中的 `Size`、`Created`、`Architecture`、`Os`、`Config`、`RootFS`、repo tags 和 repo digests，不再返回占位值。
+- **Inspect 路由修复** — `mocker inspect --type image|container` 会校验类型值，镜像检查也会正确处理 `--platform`。
+- **Compose 修复** — 发布端口会被正确转发，且 `compose -f ... up` 支持在子命令前传入 `-f`。
+- **BREAKING**：镜像检查输出从旧的 lowercase `ImageInfo` 对象变为 Docker 兼容的 `ImageInspect` 数组；`MockerKit.ImageManager.inspect(_:platform:)` 现在返回 `ImageInspect`。
+
 ### v0.2.1 — 嵌套虚拟化
 - **`--virtualization` / `--kernel`** 适用于 `mocker run` 和 `mocker create` — 向容器暴露嵌套虚拟化能力（closes #4）
 
