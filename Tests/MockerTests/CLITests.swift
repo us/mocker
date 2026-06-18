@@ -147,4 +147,29 @@ struct CLITests {
         #expect(command.arch == nil)
         #expect(command.variant == nil)
     }
+
+    @Test("image ls command accepts all list flags")
+    func imageLsAllFlags() throws {
+        let command = try ImageLs.parse(["--quiet", "--all", "--filter", "dangling=true", "--format", "{{.ID}}", "--digests", "--no-trunc", "--tree"])
+        #expect(command.options.quiet == true)
+        #expect(command.options.all == true)
+        #expect(command.options.filter == ["dangling=true"])
+        #expect(command.options.format == "{{.ID}}")
+        #expect(command.options.digests == true)
+        #expect(command.options.noTrunc == true)
+        #expect(command.options.tree == true)
+    }
+
+    @Test("container ls command accepts all list flags")
+    func containerLsAllFlags() throws {
+        let command = try ContainerLs.parse(["--all", "--quiet", "--filter", "status=running", "--format", "{{.ID}}", "--no-trunc", "-n", "3", "--latest", "--size"])
+        #expect(command.options.all == true)
+        #expect(command.options.quiet == true)
+        #expect(command.options.filter == ["status=running"])
+        #expect(command.options.format == "{{.ID}}")
+        #expect(command.options.noTrunc == true)
+        #expect(command.options.last == 3)
+        #expect(command.options.latest == true)
+        #expect(command.options.size == true)
+    }
 }

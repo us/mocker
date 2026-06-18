@@ -1,10 +1,9 @@
 import ArgumentParser
 
-struct ContainerLs: AsyncParsableCommand {
+struct PS: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "ls",
-        abstract: "List containers",
-        aliases: ["ps"]
+        commandName: "ps",
+        abstract: "List containers"
     )
 
     @OptionGroup var options: ContainerListOptions

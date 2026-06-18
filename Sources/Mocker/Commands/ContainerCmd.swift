@@ -8,7 +8,7 @@ struct ContainerCommand: AsyncParsableCommand {
             Run.self,
             Create.self,
             Start.self,
-            PS.self,
+            ContainerLs.self,
             Stop.self,
             Restart.self,
             Kill.self,
@@ -31,6 +31,6 @@ struct ContainerCommand: AsyncParsableCommand {
             Commit.self,
             ContainerPrune.self,
         ],
-        defaultSubcommand: PS.self
+        defaultSubcommand: ContainerLs.self
     )
 }

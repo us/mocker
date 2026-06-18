@@ -1,10 +1,9 @@
 import ArgumentParser
 
-struct ImageLs: AsyncParsableCommand {
+struct Images: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "ls",
-        abstract: "List images",
-        aliases: ["images"]
+        commandName: "images",
+        abstract: "List images"
     )
 
     @OptionGroup var options: ImageListOptions

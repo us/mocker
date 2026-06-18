@@ -5,7 +5,7 @@ struct ImageCommand: AsyncParsableCommand {
         commandName: "image",
         abstract: "Manage images",
         subcommands: [
-            Images.self,
+            ImageLs.self,
             Build.self,
             Pull.self,
             Push.self,
@@ -19,6 +19,6 @@ struct ImageCommand: AsyncParsableCommand {
             ImageInspect.self,
             ImagePrune.self,
         ],
-        defaultSubcommand: Images.self
+        defaultSubcommand: ImageLs.self
     )
 }
