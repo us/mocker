@@ -27,35 +27,13 @@ struct ContainerListOptions: ParsableArguments {
     var size = false
 
     func render() async throws {
+        // --size is accepted for Docker compatibility but is a no-op; ContainerInfo
+        // carries no size data. Add a SIZE column when the engine reports disk usage.
         let config = MockerConfig()
         let engine = try ContainerEngine(config: config)
-        var containers = try await engine.list(all: all)
-
-        for f in filter {
-            let parts = f.split(separator: "=", maxSplits: 1)
-            guard parts.count == 2 else { continue }
-            let key = String(parts[0])
-            let value = String(parts[1])
-            switch key {
-            case "name":
-                containers = containers.filter { $0.name.contains(value) }
-            case "status":
-                containers = containers.filter { $0.state.rawValue == value }
-            case "id":
-                containers = containers.filter { $0.id.hasPrefix(value) }
-            case "label":
-                let labelParts = value.split(separator: "=", maxSplits: 1)
-                if labelParts.count == 2 {
-                    containers = containers.filter { $0.labels[String(labelParts[0])] == String(labelParts[1]) }
-                } else {
-                    containers = containers.filter { $0.labels[value] != nil }
-                }
-            case "ancestor":
-                containers = containers.filter { $0.image == value || $0.image.hasPrefix(value) }
-            default:
-                break
-            }
-        }
+        // --latest / --last include all states regardless of --all (matches Docker).
+        let includeAll = all || latest || last != nil
+        var containers = filtered(try await engine.list(all: includeAll))
 
         if latest {
             containers = Array(containers.prefix(1))
@@ -100,5 +78,36 @@ struct ContainerListOptions: ParsableArguments {
             ]
         }
         TableFormatter.print(headers: headers, rows: rows)
+    }
+
+    /// Apply Docker-style `--filter` predicates. Pure; safe to unit-test.
+    func filtered(_ containers: [ContainerInfo]) -> [ContainerInfo] {
+        var containers = containers
+        for f in filter {
+            let parts = f.split(separator: "=", maxSplits: 1)
+            guard parts.count == 2 else { continue }
+            let key = String(parts[0])
+            let value = String(parts[1])
+            switch key {
+            case "name":
+                containers = containers.filter { $0.name.contains(value) }
+            case "status":
+                containers = containers.filter { $0.state.rawValue == value }
+            case "id":
+                containers = containers.filter { $0.id.hasPrefix(value) }
+            case "label":
+                let labelParts = value.split(separator: "=", maxSplits: 1)
+                if labelParts.count == 2 {
+                    containers = containers.filter { $0.labels[String(labelParts[0])] == String(labelParts[1]) }
+                } else {
+                    containers = containers.filter { $0.labels[value] != nil }
+                }
+            case "ancestor":
+                containers = containers.filter { $0.image == value || $0.image.hasPrefix(value) }
+            default:
+                break
+            }
+        }
+        return containers
     }
 }

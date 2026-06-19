@@ -1,5 +1,7 @@
+import Foundation
 import Testing
 import ArgumentParser
+import MockerKit
 @testable import Mocker
 
 @Suite("CLI Tests")
@@ -150,14 +152,37 @@ struct CLITests {
 
     @Test("image ls command accepts all list flags")
     func imageLsAllFlags() throws {
-        let command = try ImageLs.parse(["--quiet", "--all", "--filter", "dangling=true", "--format", "{{.ID}}", "--digests", "--no-trunc", "--tree"])
+        let command = try ImageLs.parse(["--quiet", "--all", "--filter", "reference=nginx", "--format", "{{.ID}}", "--digests", "--no-trunc", "--tree"])
         #expect(command.options.quiet == true)
         #expect(command.options.all == true)
-        #expect(command.options.filter == ["dangling=true"])
+        #expect(command.options.filter == ["reference=nginx"])
         #expect(command.options.format == "{{.ID}}")
         #expect(command.options.digests == true)
         #expect(command.options.noTrunc == true)
         #expect(command.options.tree == true)
+    }
+
+    @Test("image ls --filter narrows by reference and label")
+    func imageLsFilter() throws {
+        let images = [
+            ImageInfo(id: "a", repository: "nginx", tag: "latest", labels: ["env": "prod"]),
+            ImageInfo(id: "b", repository: "redis", tag: "7", labels: ["env": "dev"]),
+        ]
+        let byRef = try ImageLs.parse(["--filter", "reference=nginx"]).options
+        #expect(byRef.filtered(images).map(\.id) == ["a"])
+
+        let byLabel = try ImageLs.parse(["--filter", "label=env=dev"]).options
+        #expect(byLabel.filtered(images).map(\.id) == ["b"])
+    }
+
+    @Test("image ls --format substitutes repository, tag and labels")
+    func imageLsFormat() throws {
+        let img = ImageInfo(id: "abc123def456789", repository: "nginx", tag: "latest", labels: ["env": "prod"])
+        let opts = try ImageLs.parse(["--format", "{{.Repository}}:{{.Tag}} {{.Labels}}"]).options
+        #expect(opts.formatLine(img) == "nginx:latest env=prod")
+
+        let noTrunc = try ImageLs.parse(["--format", "{{.ID}}", "--no-trunc"]).options
+        #expect(noTrunc.formatLine(img) == "abc123def456789")
     }
 
     @Test("container ls command accepts all list flags")
@@ -171,5 +196,18 @@ struct CLITests {
         #expect(command.options.last == 3)
         #expect(command.options.latest == true)
         #expect(command.options.size == true)
+    }
+
+    @Test("container ls --filter narrows by status and name")
+    func containerLsFilter() throws {
+        let containers = [
+            ContainerInfo(id: "a", name: "web", image: "nginx", state: .running, status: "Up", created: .distantPast),
+            ContainerInfo(id: "b", name: "db", image: "redis", state: .exited, status: "Exited", created: .distantPast),
+        ]
+        let byStatus = try ContainerLs.parse(["--filter", "status=running"]).options
+        #expect(byStatus.filtered(containers).map(\.id) == ["a"])
+
+        let byName = try ContainerLs.parse(["--filter", "name=db"]).options
+        #expect(byName.filtered(containers).map(\.id) == ["b"])
     }
 }
