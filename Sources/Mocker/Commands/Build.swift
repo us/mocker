@@ -13,7 +13,7 @@ struct Build: AsyncParsableCommand {
     var tag: String
 
     @Option(name: .shortAndLong, help: "Name of the Dockerfile")
-    var file: String = "Dockerfile"
+    var file: String?
 
     @Flag(name: .long, help: "Do not use cache when building")
     var noCache = false

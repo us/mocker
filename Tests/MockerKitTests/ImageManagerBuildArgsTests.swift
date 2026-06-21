@@ -96,3 +96,86 @@ struct ImageManagerBuildArgsTests {
         return false
     }
 }
+
+@Suite("ImageManager Dockerfile path resolver")
+struct ImageManagerDockerfileResolverTests {
+
+    // Scenario 1 (spec): absolute -f is used verbatim — devcontainer regression case
+    @Test("absolute -f path is returned verbatim")
+    func resolveAbsoluteUsedVerbatim() {
+        let result = ImageManager.resolveDockerfilePath(
+            context: "/var/work/build-1234",
+            dockerfile: "/var/work/build-1234/Dockerfile.buildContent",
+            cwd: "/some/unrelated/cwd"
+        )
+        #expect(result == "/var/work/build-1234/Dockerfile.buildContent")
+    }
+
+    // Scenario 1 negative assertion: absolute -f must NOT be doubled onto context
+    @Test("absolute -f is not concatenated onto context")
+    func resolveAbsoluteNotDoubled() {
+        let result = ImageManager.resolveDockerfilePath(
+            context: "/var/work/build-1234",
+            dockerfile: "/var/work/build-1234/Dockerfile.buildContent",
+            cwd: "/some/unrelated/cwd"
+        )
+        #expect(!result.contains("/var/work/build-1234/var/work/build-1234"))
+    }
+
+    // Scenario 3 (spec): relative -f resolved against CWD, not context
+    @Test("relative -f resolves against CWD when CWD differs from context")
+    func resolveRelativeCWDNotContext() {
+        let result = ImageManager.resolveDockerfilePath(
+            context: "/srv/builds/ctx",
+            dockerfile: "dockerfiles/Dockerfile.prod",
+            cwd: "/home/user/project"
+        )
+        #expect(result == "/home/user/project/dockerfiles/Dockerfile.prod")
+    }
+
+    // Scenario 4 (spec): relative -f where CWD equals context — no regression for common case
+    @Test("relative -f where CWD equals context produces same result as before")
+    func resolveRelativeCWDEqualsContext() {
+        let result = ImageManager.resolveDockerfilePath(
+            context: "/home/user/myapp",
+            dockerfile: "Dockerfile.dev",
+            cwd: "/home/user/myapp"
+        )
+        #expect(result == "/home/user/myapp/Dockerfile.dev")
+    }
+
+    // Scenario 5 (spec): nil -f uses context root
+    @Test("nil dockerfile resolves to context/Dockerfile")
+    func resolveNilUsesContextRoot() {
+        let result = ImageManager.resolveDockerfilePath(
+            context: "/srv/builds/ctx",
+            dockerfile: nil,
+            cwd: "/some/cwd"
+        )
+        #expect(result == "/srv/builds/ctx/Dockerfile")
+    }
+
+    // Scenario 6 (spec): missing abs path — resolver returns correct non-doubled string
+    @Test("missing absolute path resolves to the verbatim path string")
+    func resolveMissingAbsolutePathString() {
+        let result = ImageManager.resolveDockerfilePath(
+            context: "/any/context",
+            dockerfile: "/nonexistent/path/Dockerfile",
+            cwd: "/any/cwd"
+        )
+        #expect(result == "/nonexistent/path/Dockerfile")
+        #expect(!result.contains("/any/context/nonexistent"))
+    }
+
+    // Scenario 7 (spec): missing default path — nil + context → context/Dockerfile, not doubled
+    @Test("missing default dockerfile resolves to context/Dockerfile without doubling")
+    func resolveMissingDefaultPathString() {
+        let result = ImageManager.resolveDockerfilePath(
+            context: "/some/context",
+            dockerfile: nil,
+            cwd: "/any/cwd"
+        )
+        #expect(result == "/some/context/Dockerfile")
+        #expect(!result.contains("/some/context/some/context"))
+    }
+}

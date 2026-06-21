@@ -210,4 +210,16 @@ struct CLITests {
         let byName = try ContainerLs.parse(["--filter", "name=db"]).options
         #expect(byName.filtered(containers).map(\.id) == ["b"])
     }
+
+    @Test("Build -f flag parses to the provided path")
+    func buildFileOptionParsesPath() throws {
+        let command = try Build.parse(["-f", "/abs/path/Dockerfile", "-t", "x:1", "."])
+        #expect(command.file == "/abs/path/Dockerfile")
+    }
+
+    @Test("Build -f flag defaults to nil when omitted")
+    func buildFileOptionDefaultsNil() throws {
+        let command = try Build.parse(["-t", "x:1", "."])
+        #expect(command.file == nil)
+    }
 }
