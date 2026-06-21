@@ -319,6 +319,9 @@ struct ComposePS: AsyncParsableCommand {
     @Option(name: .long, parsing: .singleValue, help: "Filter services by status")
     var status: [String] = []
 
+    @Argument(help: "Services to show (shows all if omitted)")
+    var services: [String] = []
+
     func run() async throws {
         let (_, project) = try options.loadCompose()
         let config = MockerConfig()
@@ -336,7 +339,28 @@ struct ComposePS: AsyncParsableCommand {
             volumeManager: volumeManager
         )
 
-        let containers = try await orchestrator.ps()
+        var containers = try await orchestrator.ps()
+
+        if !services.isEmpty {
+            containers = containers.filter { c in
+                let svc = c.labels["com.mocker.compose.service"] ?? ""
+                return services.contains(svc)
+            }
+        }
+
+        if quiet {
+            for c in containers { print(c.id) }
+            return
+        }
+
+        if servicesOnly {
+            var seen = Set<String>()
+            for c in containers {
+                let svc = c.labels["com.mocker.compose.service"] ?? ""
+                if !svc.isEmpty && seen.insert(svc).inserted { print(svc) }
+            }
+            return
+        }
 
         let headers = ["Name", "Image", "Command", "Service", "Created", "Status", "Ports"]
         let rows = containers.map { c in
