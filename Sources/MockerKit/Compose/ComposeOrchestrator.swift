@@ -222,10 +222,15 @@ public actor ComposeOrchestrator {
                 shouldBuild = !existingImages.contains { ComposeService.imageMatches($0, tag: tag) }
             }
             if shouldBuild {
+                let dockerfilePath = ImageManager.composeDockerfilePath(
+                    context: build.context,
+                    dockerfile: build.dockerfile ?? "Dockerfile",
+                    cwd: FileManager.default.currentDirectoryPath
+                )
                 _ = try await imageManager.build(
                     tag: tag,
                     context: build.context,
-                    dockerfile: build.dockerfile ?? "Dockerfile",
+                    dockerfile: dockerfilePath,
                     buildArgs: build.argList,
                     target: build.target
                 )

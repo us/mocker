@@ -580,10 +580,14 @@ struct ComposeBuildCommand: AsyncParsableCommand {
             guard let buildConfig = service.build else { continue }
             let tag = service.image ?? "\(name):latest"
             if !quiet { print("Building \(name)...") }
-            // Compose-file `build.args` first, then CLI `--build-arg` so CLI wins on conflict.
+            let dockerfilePath = ImageManager.composeDockerfilePath(
+                context: buildConfig.context,
+                dockerfile: buildConfig.dockerfile ?? "Dockerfile",
+                cwd: FileManager.default.currentDirectoryPath
+            )
             _ = try await manager.build(
                 tag: tag, context: buildConfig.context,
-                dockerfile: buildConfig.dockerfile ?? "Dockerfile",
+                dockerfile: dockerfilePath,
                 noCache: noCache, buildArgs: buildConfig.argList + buildArg,
                 target: buildConfig.target
             )

@@ -241,6 +241,11 @@ public actor ImageManager {
         return args
     }
 
+    static func resolveContextPath(context: String, cwd: String) -> String {
+        guard !context.hasPrefix("/") else { return context }
+        return URL(fileURLWithPath: cwd).appendingPathComponent(context).standardized.path
+    }
+
     static func resolveDockerfilePath(context: String, dockerfile: String?, cwd: String) -> String {
         guard let dockerfile else {
             return URL(fileURLWithPath: context).appendingPathComponent("Dockerfile").standardized.path
@@ -251,21 +256,21 @@ public actor ImageManager {
         return URL(fileURLWithPath: cwd).appendingPathComponent(dockerfile).standardized.path
     }
 
+    /// Resolve a Compose service's `build.dockerfile` to an absolute path using Docker Compose semantics:
+    /// relative `dockerfile` is relative to `build.context`, not the CWD.
+    public static func composeDockerfilePath(context: String, dockerfile: String, cwd: String) -> String {
+        let absContext = resolveContextPath(context: context, cwd: cwd)
+        return resolveDockerfilePath(context: absContext, dockerfile: dockerfile, cwd: absContext)
+    }
+
     /// Build an image from a Dockerfile using the `container` CLI.
     /// - Parameter platforms: pass multiple values to build a multi-arch manifest list (e.g. `["linux/amd64", "linux/arm64"]`).
     /// - Parameter builder: optional named builder instance forwarded to `container build --builder`,
     ///   enabling a remote BuildKit node for exotic architectures (apple/container#1496).
     public func build(tag: String, context: String, dockerfile: String? = nil, noCache: Bool = false, buildArgs: [String] = [], platforms: [String] = [], target: String? = nil, labels: [String] = [], quiet: Bool = false, progress: String? = nil, output: [String] = [], builder: String? = nil) async throws -> ImageInfo {
-        let contextURL: URL
-        if context.hasPrefix("/") {
-            contextURL = URL(fileURLWithPath: context)
-        } else {
-            contextURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-                .appendingPathComponent(context)
-                .standardized
-        }
+        let absContext = Self.resolveContextPath(context: context, cwd: FileManager.default.currentDirectoryPath)
         let dockerfilePath = Self.resolveDockerfilePath(
-            context: contextURL.path,
+            context: absContext,
             dockerfile: dockerfile,
             cwd: FileManager.default.currentDirectoryPath
         )

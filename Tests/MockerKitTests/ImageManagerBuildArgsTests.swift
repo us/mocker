@@ -97,6 +97,66 @@ struct ImageManagerBuildArgsTests {
     }
 }
 
+@Suite("ImageManager Compose dockerfile path resolver")
+struct ImageManagerComposeDockerfilePathTests {
+
+    // Regression: context=./app, cwd=/project, dockerfile=default → must be /project/app/Dockerfile, NOT /project/Dockerfile
+    @Test("default dockerfile resolves relative to context, not CWD (regression guard)")
+    func composeDefaultDockerfileResolvesRelativeToContext() {
+        let result = ImageManager.composeDockerfilePath(
+            context: "./app",
+            dockerfile: "Dockerfile",
+            cwd: "/project"
+        )
+        #expect(result == "/project/app/Dockerfile")
+        #expect(result != "/project/Dockerfile")
+    }
+
+    // relative dockerfile resolves relative to context, not CWD
+    @Test("relative dockerfile resolves relative to context")
+    func composeRelativeDockerfileResolvesRelativeToContext() {
+        let result = ImageManager.composeDockerfilePath(
+            context: "./app",
+            dockerfile: "Dockerfile.prod",
+            cwd: "/project"
+        )
+        #expect(result == "/project/app/Dockerfile.prod")
+    }
+
+    // absolute dockerfile is returned verbatim regardless of context
+    @Test("absolute dockerfile is returned verbatim")
+    func composeAbsoluteDockerfileVerbatim() {
+        let result = ImageManager.composeDockerfilePath(
+            context: "./app",
+            dockerfile: "/custom/path/Dockerfile",
+            cwd: "/project"
+        )
+        #expect(result == "/custom/path/Dockerfile")
+    }
+
+    // context already absolute — still resolves dockerfile relative to it
+    @Test("absolute context with relative dockerfile resolves correctly")
+    func composeAbsoluteContextRelativeDockerfile() {
+        let result = ImageManager.composeDockerfilePath(
+            context: "/project/app",
+            dockerfile: "Dockerfile.dev",
+            cwd: "/project"
+        )
+        #expect(result == "/project/app/Dockerfile.dev")
+    }
+
+    // context == CWD — common case, must also be correct
+    @Test("when context equals CWD relative dockerfile resolves to context/dockerfile")
+    func composeContextEqualsCWD() {
+        let result = ImageManager.composeDockerfilePath(
+            context: ".",
+            dockerfile: "Dockerfile",
+            cwd: "/project"
+        )
+        #expect(result == "/project/Dockerfile")
+    }
+}
+
 @Suite("ImageManager Dockerfile path resolver")
 struct ImageManagerDockerfileResolverTests {
 
