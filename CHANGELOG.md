@@ -12,6 +12,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **image inspect:** `mocker image inspect` and `mocker inspect --type=image` now return Docker-compatible `ImageInspect` JSON arrays with PascalCase keys instead of the previous lowercase `ImageInfo` object shape.
 * **MockerKit:** `ImageManager.inspect(_:platform:)` returns `ImageInspect` instead of `ImageInfo`.
 
+## [0.5.0](https://github.com/us/mocker/compare/v0.4.1...v0.5.0) (2026-06-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* subcommand flags placed AFTER the image/container/service are now captured as container command arguments. 'mocker exec ctn -it bash' must become 'mocker exec -it ctn bash'.
+
+### Features
+
+* **compose:** add --quiet, --services, and service args to compose ps ([c351ae7](https://github.com/us/mocker/commit/c351ae7365ac12ff14454f26c193fd444222f01a)), closes [#32](https://github.com/us/mocker/issues/32)
+
+
+### Bug Fixes
+
+* **build:** resolve -f Dockerfile path with Docker parity ([5880740](https://github.com/us/mocker/commit/58807407cb55bac27ba052e499a3b381b611ff02))
+* **compose:** resolve build.dockerfile relative to context ([cc4241a](https://github.com/us/mocker/commit/cc4241af6f99aeadf9f7896116bb54a81058c8bb))
+* pass container command/args literally in run/create/exec/compose ([c1b6570](https://github.com/us/mocker/commit/c1b65700de4d458af89cb70cf818db4ea34095a7))
+
 ## [0.4.1](https://github.com/us/mocker/compare/v0.4.0...v0.4.1) (2026-06-19)
 
 
