@@ -733,7 +733,8 @@ struct ComposePush: AsyncParsableCommand {
 struct ComposeExec: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "exec",
-        abstract: "Execute a command in a running service container"
+        abstract: "Execute a command in a running service container",
+        discussion: "Usage: mocker compose exec [OPTIONS] SERVICE COMMAND [ARG...]"
     )
 
     @OptionGroup var options: ComposeOptions
@@ -741,7 +742,7 @@ struct ComposeExec: AsyncParsableCommand {
     @Argument(help: "Service name")
     var service: String
 
-    @Argument(help: "Command to execute")
+    @Argument(parsing: .captureForPassthrough, help: "Command to execute")
     var command: [String]
 
     @Flag(name: .shortAndLong, help: "Detached mode")
@@ -774,6 +775,12 @@ struct ComposeExec: AsyncParsableCommand {
     @Flag(name: .long, help: "Give extended privileges to the process")
     var privileged = false
 
+    mutating func validate() throws {
+        if command.first == "--" {
+            command.removeFirst()
+        }
+    }
+
     func run() async throws {
         let (_, project) = try options.loadCompose()
         let config = MockerConfig()
@@ -789,7 +796,8 @@ struct ComposeExec: AsyncParsableCommand {
 struct ComposeRun: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "run",
-        abstract: "Run a one-off command on a service"
+        abstract: "Run a one-off command on a service",
+        discussion: "Usage: mocker compose run [OPTIONS] SERVICE [COMMAND] [ARG...]"
     )
 
     @OptionGroup var options: ComposeOptions
@@ -797,7 +805,7 @@ struct ComposeRun: AsyncParsableCommand {
     @Argument(help: "Service name")
     var service: String
 
-    @Argument(help: "Command to execute")
+    @Argument(parsing: .captureForPassthrough, help: "Command to execute")
     var command: [String] = []
 
     @Flag(name: .shortAndLong, help: "Run container in background")
@@ -880,6 +888,12 @@ struct ComposeRun: AsyncParsableCommand {
 
     @Flag(name: [.customShort("P"), .customLong("publish-all")], help: "Publish all exposed ports to random host ports")
     var publishAll = false
+
+    mutating func validate() throws {
+        if command.first == "--" {
+            command.removeFirst()
+        }
+    }
 
     func run() async throws {
         let (composeFile, _) = try options.loadCompose()

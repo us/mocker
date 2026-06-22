@@ -3,13 +3,14 @@ import MockerKit
 
 struct Exec: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Execute a command in a running container"
+        abstract: "Execute a command in a running container",
+        discussion: "Usage: mocker exec [OPTIONS] CONTAINER COMMAND [ARG...]"
     )
 
     @Argument(help: "Container name or ID")
     var container: String
 
-    @Argument(help: "Command to execute")
+    @Argument(parsing: .captureForPassthrough, help: "Command to execute")
     var command: [String]
 
     @Flag(name: .shortAndLong, help: "Keep STDIN open even if not attached")
@@ -38,6 +39,12 @@ struct Exec: AsyncParsableCommand {
 
     @Flag(name: .long, help: "Give extended privileges to the command")
     var privileged = false
+
+    mutating func validate() throws {
+        if command.first == "--" {
+            command.removeFirst()
+        }
+    }
 
     func run() async throws {
         let config = MockerConfig()

@@ -222,4 +222,78 @@ struct CLITests {
         let command = try Build.parse(["-t", "x:1", "."])
         #expect(command.file == nil)
     }
+
+    @Test("Run passes args after image to container")
+    func runPassthroughAfterImage() throws {
+        let command = try Run.parse(["--rm", "img", "ls", "-la", "/stuff/"])
+        #expect(command.command == ["ls", "-la", "/stuff/"])
+        #expect(command.rm == true)
+    }
+
+    @Test("Create passes args after image to container")
+    func createPassthroughAfterImage() throws {
+        let command = try Create.parse(["img", "cmd", "-flag"])
+        #expect(command.command == ["cmd", "-flag"])
+    }
+
+    @Test("Exec passes args after container to command")
+    func execPassthroughAfterContainer() throws {
+        let command = try Exec.parse(["ctn", "ls", "-la"])
+        #expect(command.command == ["ls", "-la"])
+    }
+
+    @Test("Compose run passes args after service to container")
+    func composeRunPassthroughAfterService() throws {
+        let command = try ComposeRun.parse(["svc", "ls", "-la"])
+        #expect(command.command == ["ls", "-la"])
+    }
+
+    @Test("Compose exec passes args after service to command")
+    func composeExecPassthroughAfterService() throws {
+        let command = try ComposeExec.parse(["svc", "ls", "-la"])
+        #expect(command.command == ["ls", "-la"])
+    }
+
+    @Test("Run strips leading -- terminator")
+    func runStripsLeadingDoubleDash() throws {
+        var command = try Run.parse(["--rm", "img", "--", "ls", "-la"])
+        try command.validate()
+        #expect(command.command == ["ls", "-la"])
+        #expect(command.rm == true)
+    }
+
+    @Test("Run preserves non-leading -- inside command")
+    func runPreservesNonLeadingDoubleDash() throws {
+        var command = try Run.parse(["img", "ls", "--", "-la"])
+        try command.validate()
+        #expect(command.command == ["ls", "--", "-la"])
+    }
+
+    @Test("Create strips leading -- terminator")
+    func createStripsLeadingDoubleDash() throws {
+        var command = try Create.parse(["img", "--", "cmd", "-flag"])
+        try command.validate()
+        #expect(command.command == ["cmd", "-flag"])
+    }
+
+    @Test("Exec strips leading -- terminator")
+    func execStripsLeadingDoubleDash() throws {
+        var command = try Exec.parse(["ctn", "--", "ls", "-la"])
+        try command.validate()
+        #expect(command.command == ["ls", "-la"])
+    }
+
+    @Test("Compose run strips leading -- terminator")
+    func composeRunStripsLeadingDoubleDash() throws {
+        var command = try ComposeRun.parse(["svc", "--", "ls", "-la"])
+        try command.validate()
+        #expect(command.command == ["ls", "-la"])
+    }
+
+    @Test("Compose exec strips leading -- terminator")
+    func composeExecStripsLeadingDoubleDash() throws {
+        var command = try ComposeExec.parse(["svc", "--", "ls", "-la"])
+        try command.validate()
+        #expect(command.command == ["ls", "-la"])
+    }
 }

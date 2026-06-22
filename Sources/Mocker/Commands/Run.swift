@@ -4,13 +4,14 @@ import Foundation
 
 struct Run: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Create and run a new container"
+        abstract: "Create and run a new container",
+        discussion: "Usage: mocker run [OPTIONS] IMAGE [COMMAND] [ARG...]"
     )
 
     @Argument(help: "Image to run")
     var image: String
 
-    @Argument(help: "Command to execute in the container")
+    @Argument(parsing: .captureForPassthrough, help: "Command to execute in the container")
     var command: [String] = []
 
     @Option(name: .long, help: "Assign a name to the container")
@@ -311,6 +312,12 @@ struct Run: AsyncParsableCommand {
 
     @Option(name: .customLong("volumes-from"), parsing: .singleValue, help: "Mount volumes from the specified container(s)")
     var volumesFrom: [String] = []
+
+    mutating func validate() throws {
+        if command.first == "--" {
+            command.removeFirst()
+        }
+    }
 
     func run() async throws {
         // Fail-fast for flags not supported by Apple Containerization runtime
