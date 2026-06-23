@@ -128,6 +128,40 @@ struct ContainerEngineTests {
         #expect(config.kernel == "/tmp/vmlinux")
     }
 
+    // MARK: - sanitizeCpuCount
+
+    @Test("sanitizeCpuCount with integer string")
+    func sanitizeCpuCountInteger() {
+        #expect(ContainerEngine.sanitizeCpuCount("2") == "2")
+        #expect(ContainerEngine.sanitizeCpuCount("1") == "1")
+    }
+
+    @Test("sanitizeCpuCount with fractional value rounds up")
+    func sanitizeCpuCountFractional() {
+        #expect(ContainerEngine.sanitizeCpuCount("0.50") == "1")
+        #expect(ContainerEngine.sanitizeCpuCount("1.5") == "2")
+        #expect(ContainerEngine.sanitizeCpuCount("0.25") == "1")
+    }
+
+    @Test("sanitizeCpuCount returns nil for zero or sub-1 rounding")
+    func sanitizeCpuCountZero() {
+        #expect(ContainerEngine.sanitizeCpuCount("0") == nil)
+        #expect(ContainerEngine.sanitizeCpuCount("0.0") == nil)
+    }
+
+    @Test("sanitizeCpuCount returns nil for invalid input")
+    func sanitizeCpuCountInvalid() {
+        #expect(ContainerEngine.sanitizeCpuCount("abc") == nil)
+        #expect(ContainerEngine.sanitizeCpuCount("") == nil)
+    }
+
+    @Test("sanitizeCpuCount with Docker Compose string format")
+    func sanitizeCpuCountComposeFormat() {
+        #expect(ContainerEngine.sanitizeCpuCount("0.50") == "1")
+        #expect(ContainerEngine.sanitizeCpuCount("0.5") == "1")
+        #expect(ContainerEngine.sanitizeCpuCount("3") == "3")
+    }
+
     @Test("Run arguments include nested virtualization flags")
     func testRunArgumentsIncludeVirtualizationFlags() {
         let config = ContainerConfig(

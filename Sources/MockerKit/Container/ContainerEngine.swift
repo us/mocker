@@ -132,8 +132,8 @@ public actor ContainerEngine {
         if containerConfig.interactive { args.append("-i") }
         if containerConfig.tty { args.append("-t") }
 
-        if let cpus = containerConfig.cpus {
-            args += ["-c", String(cpus)]
+        if let cpus = containerConfig.cpus, let cpuCount = Self.sanitizeCpuCount(cpus) {
+            args += ["-c", cpuCount]
         }
 
         if let memory = containerConfig.memory {
@@ -176,6 +176,15 @@ public actor ContainerEngine {
         args.append(containerConfig.image)
         args += containerConfig.command
         return args
+    }
+
+    /// Convert a Docker Compose `cpus` value (fractional or integer string) to an
+    /// integer CPU count suitable for Apple's `container` CLI `-c` flag.
+    /// Returns `nil` when the value rounds to < 1 (container CLI requires ≥ 1).
+    static func sanitizeCpuCount(_ cpus: String) -> String? {
+        guard let value = Double(cpus) else { return nil }
+        let count = Int(ceil(value))
+        return count >= 1 ? String(count) : nil
     }
 
     // MARK: - List
