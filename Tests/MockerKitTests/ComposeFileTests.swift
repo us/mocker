@@ -246,6 +246,200 @@ struct ComposeFileTests {
         #expect(compose.services["app"]?.build?.target == "base")
     }
 
+    // MARK: - Resource limits
+
+    @Test("Parse legacy mem_limit")
+    func parseMemLimit() throws {
+        let yaml = """
+        services:
+          app:
+            image: nginx
+            mem_limit: 512m
+        """
+
+        let compose = try ComposeFile.parse(yaml)
+        #expect(compose.services["app"]?.memLimit == "512m")
+    }
+
+    @Test("Parse legacy cpus as fractional")
+    func parseCpusFractional() throws {
+        let yaml = """
+        services:
+          app:
+            image: nginx
+            cpus: 0.5
+        """
+
+        let compose = try ComposeFile.parse(yaml)
+        #expect(compose.services["app"]?.cpus == "0.5")
+    }
+
+    @Test("Parse legacy cpus as string")
+    func parseCpusString() throws {
+        let yaml = """
+        services:
+          app:
+            image: nginx
+            cpus: "0.50"
+        """
+
+        let compose = try ComposeFile.parse(yaml)
+        #expect(compose.services["app"]?.cpus == "0.50")
+    }
+
+    @Test("Parse legacy mem_reservation")
+    func parseMemReservation() throws {
+        let yaml = """
+        services:
+          app:
+            image: nginx
+            mem_reservation: 256m
+        """
+
+        let compose = try ComposeFile.parse(yaml)
+        #expect(compose.services["app"]?.memReservation == "256m")
+    }
+
+    @Test("Parse legacy memswap_limit")
+    func parseMemswapLimit() throws {
+        let yaml = """
+        services:
+          app:
+            image: nginx
+            memswap_limit: 1g
+        """
+
+        let compose = try ComposeFile.parse(yaml)
+        #expect(compose.services["app"]?.memSwapLimit == "1g")
+    }
+
+    @Test("Parse legacy shm_size")
+    func parseShmSize() throws {
+        let yaml = """
+        services:
+          app:
+            image: nginx
+            shm_size: 256m
+        """
+
+        let compose = try ComposeFile.parse(yaml)
+        #expect(compose.services["app"]?.shmSize == "256m")
+    }
+
+    @Test("Parse legacy pids_limit")
+    func parsePidsLimit() throws {
+        let yaml = """
+        services:
+          app:
+            image: nginx
+            pids_limit: 100
+        """
+
+        let compose = try ComposeFile.parse(yaml)
+        #expect(compose.services["app"]?.pidsLimit == 100)
+    }
+
+    @Test("Parse deploy.resources.limits")
+    func parseDeployResourcesLimits() throws {
+        let yaml = """
+        services:
+          app:
+            image: nginx
+            deploy:
+              resources:
+                limits:
+                  cpus: "0.50"
+                  memory: 512M
+                  pids: 50
+        """
+
+        let compose = try ComposeFile.parse(yaml)
+        #expect(compose.services["app"]?.cpus == "0.50")
+        #expect(compose.services["app"]?.memLimit == "512M")
+        #expect(compose.services["app"]?.pidsLimit == 50)
+    }
+
+    @Test("Parse deploy.resources.reservations")
+    func parseDeployResourcesReservations() throws {
+        let yaml = """
+        services:
+          app:
+            image: nginx
+            deploy:
+              resources:
+                reservations:
+                  cpus: "0.25"
+                  memory: 256M
+        """
+
+        let compose = try ComposeFile.parse(yaml)
+        #expect(compose.services["app"]?.cpusReservation == "0.25")
+        #expect(compose.services["app"]?.memReservation == "256M")
+    }
+
+    @Test("Parse deploy.resources.limits overrides legacy mem_limit")
+    func parseDeployOverridesLegacy() throws {
+        let yaml = """
+        services:
+          app:
+            image: nginx
+            mem_limit: 256m
+            deploy:
+              resources:
+                limits:
+                  memory: 512M
+        """
+
+        let compose = try ComposeFile.parse(yaml)
+        #expect(compose.services["app"]?.memLimit == "512M")
+    }
+
+    @Test("Parse all resource limits together")
+    func parseAllResourceLimits() throws {
+        let yaml = """
+        services:
+          app:
+            image: nginx
+            mem_limit: 512m
+            mem_reservation: 256m
+            memswap_limit: 1g
+            cpus: 2
+            shm_size: 128m
+            pids_limit: 200
+        """
+
+        let compose = try ComposeFile.parse(yaml)
+        #expect(compose.services["app"]?.memLimit == "512m")
+        #expect(compose.services["app"]?.memReservation == "256m")
+        #expect(compose.services["app"]?.memSwapLimit == "1g")
+        #expect(compose.services["app"]?.cpus == "2")
+        #expect(compose.services["app"]?.shmSize == "128m")
+        #expect(compose.services["app"]?.pidsLimit == 200)
+    }
+
+    @Test("Resource limits merge: later overlay wins")
+    func mergeResourceLimits() throws {
+        let base = try ComposeFile.parse("""
+        services:
+          app:
+            image: nginx
+            mem_limit: 256m
+            cpus: 1
+            shm_size: 64m
+        """)
+        let overlay = try ComposeFile.parse("""
+        services:
+          app:
+            mem_limit: 512m
+            shm_size: 128m
+        """)
+
+        let merged = ComposeFile.merge([base, overlay])
+        #expect(merged.services["app"]?.memLimit == "512m")
+        #expect(merged.services["app"]?.cpus == "1", "cpus not in overlay, keep base value")
+        #expect(merged.services["app"]?.shmSize == "128m")
+    }
+
     @Test("findDefault returns nil when no compose file exists in empty directory")
     func findDefaultNoFile() throws {
         let dir = try makeTempDir()

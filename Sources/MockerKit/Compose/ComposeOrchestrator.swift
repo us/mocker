@@ -271,7 +271,10 @@ public actor ComposeOrchestrator {
                 ["com.mocker.compose.project": projectName, "com.mocker.compose.service": service.name]
             ) { _, new in new },
             workingDir: service.workingDir,
-            hostname: service.hostname
+            hostname: service.hostname,
+            shmSize: service.shmSize,
+            memory: service.memLimit,
+            cpus: service.cpus
         )
 
         return try await engine.run(config)

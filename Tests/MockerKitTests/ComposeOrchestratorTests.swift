@@ -136,7 +136,10 @@ struct ComposeOrchestratorTests {
         let svc = ComposeService(
             name: "app", image: nil, build: nil, command: [], environment: [:],
             ports: [], volumes: [], networks: [], dependsOn: [], restart: nil,
-            labels: [:], hostname: nil, workingDir: nil
+            labels: [:], hostname: nil, workingDir: nil,
+            memLimit: nil, cpus: nil, memReservation: nil, cpusReservation: nil,
+            memSwapLimit: nil,
+            shmSize: nil, pidsLimit: nil
         )
         #expect(svc.resolveImageSource(projectName: "proj") == .none)
     }

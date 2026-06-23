@@ -221,6 +221,15 @@ public struct ComposeService: Sendable {
     public var hostname: String?
     public var workingDir: String?
 
+    // Resource limits — Docker Compose spec (legacy top-level + deploy.resources)
+    public var memLimit: String?
+    public var cpus: String?
+    public var memReservation: String?
+    public var cpusReservation: String?
+    public var memSwapLimit: String?
+    public var shmSize: String?
+    public var pidsLimit: Int?
+
     public static func parse(name: String, from dict: [String: Any]) throws -> ComposeService {
         let environment = parseEnvironment(dict["environment"])
         let ports = (dict["ports"] as? [Any])?.compactMap { "\($0)" } ?? []
@@ -244,6 +253,15 @@ public struct ComposeService: Sendable {
             }
         }
 
+        // Parse resource limits: deploy.resources overrides legacy top-level fields
+        let memLimit = parseDeployNested(dict["deploy"], "resources", "limits", "memory") ?? parseStringValue(dict["mem_limit"])
+        let cpus = parseDeployNested(dict["deploy"], "resources", "limits", "cpus") ?? parseCpusValue(dict["cpus"])
+        let memReservation = parseDeployNested(dict["deploy"], "resources", "reservations", "memory") ?? parseStringValue(dict["mem_reservation"])
+        let cpusReservation = parseDeployNested(dict["deploy"], "resources", "reservations", "cpus")
+        let memSwapLimit = parseStringValue(dict["memswap_limit"])
+        let shmSize = parseStringValue(dict["shm_size"])
+        let pidsLimit = parseIntValue(dict["pids_limit"]) ?? parseDeployInt(dict["deploy"], "resources", "limits", "pids")
+
         return ComposeService(
             name: name,
             image: dict["image"] as? String,
@@ -257,7 +275,14 @@ public struct ComposeService: Sendable {
             restart: dict["restart"] as? String,
             labels: labels,
             hostname: dict["hostname"] as? String,
-            workingDir: dict["working_dir"] as? String
+            workingDir: dict["working_dir"] as? String,
+            memLimit: memLimit,
+            cpus: cpus,
+            memReservation: memReservation,
+            cpusReservation: cpusReservation,
+            memSwapLimit: memSwapLimit,
+            shmSize: shmSize,
+            pidsLimit: pidsLimit
         )
     }
 
@@ -284,7 +309,14 @@ public struct ComposeService: Sendable {
             restart: other.restart ?? restart,
             labels: labels.merging(other.labels) { _, new in new },
             hostname: other.hostname ?? hostname,
-            workingDir: other.workingDir ?? workingDir
+            workingDir: other.workingDir ?? workingDir,
+            memLimit: other.memLimit ?? memLimit,
+            cpus: other.cpus ?? cpus,
+            memReservation: other.memReservation ?? memReservation,
+            cpusReservation: other.cpusReservation ?? cpusReservation,
+            memSwapLimit: other.memSwapLimit ?? memSwapLimit,
+            shmSize: other.shmSize ?? shmSize,
+            pidsLimit: other.pidsLimit ?? pidsLimit
         )
     }
 
@@ -368,6 +400,56 @@ public struct ComposeService: Sendable {
             return list
         }
         return []
+    }
+
+    // MARK: - Resource limit parsing
+
+    /// Extract a string value from a YAML node (string or number).
+    private static func parseStringValue(_ value: Any?) -> String? {
+        guard let value else { return nil }
+        if let str = value as? String { return str }
+        if let num = value as? Int { return String(num) }
+        if let num = value as? Double { return String(num) }
+        return nil
+    }
+
+    /// Extract an integer value from a YAML node.
+    private static func parseIntValue(_ value: Any?) -> Int? {
+        guard let value else { return nil }
+        if let int = value as? Int { return int }
+        if let str = value as? String, let int = Int(str) { return int }
+        return nil
+    }
+
+    /// Parse `cpus` — fractional number (`0.5`) or string (`"0.50"`).
+    private static func parseCpusValue(_ value: Any?) -> String? {
+        guard let value else { return nil }
+        if let str = value as? String { return str }
+        if let num = value as? Double { return String(num) }
+        if let num = value as? Int { return String(num) }
+        return nil
+    }
+
+    /// Walk a nested deploy path like `deploy.resources.limits.memory`.
+    private static func parseDeployNested(_ value: Any?, _ path: String...) -> String? {
+        guard let dict = value as? [String: Any] else { return nil }
+        var current: Any? = dict
+        for key in path {
+            guard let d = current as? [String: Any] else { return nil }
+            current = d[key]
+        }
+        return parseStringValue(current)
+    }
+
+    /// Walk a nested deploy path for integer values like `deploy.resources.limits.pids`.
+    private static func parseDeployInt(_ value: Any?, _ path: String...) -> Int? {
+        guard let dict = value as? [String: Any] else { return nil }
+        var current: Any? = dict
+        for key in path {
+            guard let d = current as? [String: Any] else { return nil }
+            current = d[key]
+        }
+        return parseIntValue(current)
     }
 }
 
