@@ -440,6 +440,104 @@ struct ComposeFileTests {
         #expect(merged.services["app"]?.shmSize == "128m")
     }
 
+    @Test("Parse deploy.restart_policy overrides legacy restart")
+    func parseDeployRestartPolicy() throws {
+        let yaml = """
+        services:
+          app:
+            image: nginx
+            restart: always
+            deploy:
+              restart_policy:
+                condition: on-failure
+                delay: 5s
+                max_attempts: 3
+                window: 120s
+        """
+
+        let compose = try ComposeFile.parse(yaml)
+        #expect(compose.services["app"]?.restart == "on-failure")
+        #expect(compose.services["app"]?.restartPolicyDelay == "5s")
+        #expect(compose.services["app"]?.restartPolicyMaxAttempts == 3)
+        #expect(compose.services["app"]?.restartPolicyWindow == "120s")
+    }
+
+    @Test("Parse deploy.restart_policy only, no legacy restart")
+    func parseDeployRestartPolicyOnly() throws {
+        let yaml = """
+        services:
+          app:
+            image: nginx
+            deploy:
+              restart_policy:
+                condition: any
+                delay: 10s
+        """
+
+        let compose = try ComposeFile.parse(yaml)
+        #expect(compose.services["app"]?.restart == "always", "any → always")
+        #expect(compose.services["app"]?.restartPolicyDelay == "10s")
+        #expect(compose.services["app"]?.restartPolicyMaxAttempts == nil)
+    }
+
+    @Test("deploy.restart_policy condition none maps to no")
+    func parseDeployRestartPolicyNone() throws {
+        let yaml = """
+        services:
+          app:
+            image: nginx
+            deploy:
+              restart_policy:
+                condition: none
+        """
+
+        let compose = try ComposeFile.parse(yaml)
+        #expect(compose.services["app"]?.restart == "no")
+    }
+
+    @Test("Legacy restart used when no deploy.restart_policy")
+    func parseLegacyRestartWhenNoDeploy() throws {
+        let yaml = """
+        services:
+          app:
+            image: nginx
+            restart: unless-stopped
+        """
+
+        let compose = try ComposeFile.parse(yaml)
+        #expect(compose.services["app"]?.restart == "unless-stopped")
+        #expect(compose.services["app"]?.restartPolicyDelay == nil)
+    }
+
+    @Test("Restart policy merge: later overlay wins")
+    func mergeRestartPolicy() throws {
+        let base = try ComposeFile.parse("""
+        services:
+          app:
+            image: nginx
+            deploy:
+              restart_policy:
+                condition: on-failure
+                delay: 5s
+                max_attempts: 3
+        """)
+        let overlay = try ComposeFile.parse("""
+        services:
+          app:
+            deploy:
+              restart_policy:
+                condition: any
+                delay: 10s
+                window: 60s
+        """)
+
+        let merged = ComposeFile.merge([base, overlay])
+        #expect(merged.services["app"]?.restart == "always", "any → always")
+        #expect(merged.services["app"]?.restartPolicyDelay == "10s")
+        #expect(merged.services["app"]?.restartPolicyMaxAttempts == 3, "max_attempts not in overlay, keep base")
+        #expect(merged.services["app"]?.restartPolicyWindow == "60s")
+    }
+
     @Test("findDefault returns nil when no compose file exists in empty directory")
     func findDefaultNoFile() throws {
         let dir = try makeTempDir()

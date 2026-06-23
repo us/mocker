@@ -139,7 +139,8 @@ struct ComposeOrchestratorTests {
             labels: [:], hostname: nil, workingDir: nil,
             memLimit: nil, cpus: nil, memReservation: nil, cpusReservation: nil,
             memSwapLimit: nil,
-            shmSize: nil, pidsLimit: nil
+            shmSize: nil, pidsLimit: nil,
+            restartPolicyDelay: nil, restartPolicyMaxAttempts: nil, restartPolicyWindow: nil
         )
         #expect(svc.resolveImageSource(projectName: "proj") == .none)
     }

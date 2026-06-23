@@ -272,6 +272,7 @@ public actor ComposeOrchestrator {
             ) { _, new in new },
             workingDir: service.workingDir,
             hostname: service.hostname,
+            restartPolicy: service.restart.flatMap { RestartPolicy(rawValue: $0) } ?? .no,
             shmSize: service.shmSize,
             memory: service.memLimit,
             cpus: service.cpus

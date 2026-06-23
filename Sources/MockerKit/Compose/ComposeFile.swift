@@ -230,6 +230,11 @@ public struct ComposeService: Sendable {
     public var shmSize: String?
     public var pidsLimit: Int?
 
+    // deploy.restart_policy — Docker Compose deploy spec
+    public var restartPolicyDelay: String?
+    public var restartPolicyMaxAttempts: Int?
+    public var restartPolicyWindow: String?
+
     public static func parse(name: String, from dict: [String: Any]) throws -> ComposeService {
         let environment = parseEnvironment(dict["environment"])
         let ports = (dict["ports"] as? [Any])?.compactMap { "\($0)" } ?? []
@@ -262,6 +267,24 @@ public struct ComposeService: Sendable {
         let shmSize = parseStringValue(dict["shm_size"])
         let pidsLimit = parseIntValue(dict["pids_limit"]) ?? parseDeployInt(dict["deploy"], "resources", "limits", "pids")
 
+        // Parse deploy.restart_policy — overrides legacy `restart` field per Compose spec
+        let restartPolicy = parseRestartPolicy(dict["deploy"])
+        let restartValue: String?
+        let restartPolicyDelay: String?
+        let restartPolicyMaxAttempts: Int?
+        let restartPolicyWindow: String?
+        if let rp = restartPolicy {
+            restartValue = rp.condition.map { mapRestartCondition($0) }
+            restartPolicyDelay = rp.delay
+            restartPolicyMaxAttempts = rp.maxAttempts
+            restartPolicyWindow = rp.window
+        } else {
+            restartValue = dict["restart"] as? String
+            restartPolicyDelay = nil
+            restartPolicyMaxAttempts = nil
+            restartPolicyWindow = nil
+        }
+
         return ComposeService(
             name: name,
             image: dict["image"] as? String,
@@ -272,7 +295,7 @@ public struct ComposeService: Sendable {
             volumes: volumes,
             networks: networks,
             dependsOn: dependsOn,
-            restart: dict["restart"] as? String,
+            restart: restartValue,
             labels: labels,
             hostname: dict["hostname"] as? String,
             workingDir: dict["working_dir"] as? String,
@@ -282,7 +305,10 @@ public struct ComposeService: Sendable {
             cpusReservation: cpusReservation,
             memSwapLimit: memSwapLimit,
             shmSize: shmSize,
-            pidsLimit: pidsLimit
+            pidsLimit: pidsLimit,
+            restartPolicyDelay: restartPolicyDelay,
+            restartPolicyMaxAttempts: restartPolicyMaxAttempts,
+            restartPolicyWindow: restartPolicyWindow
         )
     }
 
@@ -316,7 +342,10 @@ public struct ComposeService: Sendable {
             cpusReservation: other.cpusReservation ?? cpusReservation,
             memSwapLimit: other.memSwapLimit ?? memSwapLimit,
             shmSize: other.shmSize ?? shmSize,
-            pidsLimit: other.pidsLimit ?? pidsLimit
+            pidsLimit: other.pidsLimit ?? pidsLimit,
+            restartPolicyDelay: other.restartPolicyDelay ?? restartPolicyDelay,
+            restartPolicyMaxAttempts: other.restartPolicyMaxAttempts ?? restartPolicyMaxAttempts,
+            restartPolicyWindow: other.restartPolicyWindow ?? restartPolicyWindow
         )
     }
 
@@ -451,6 +480,40 @@ public struct ComposeService: Sendable {
         }
         return parseIntValue(current)
     }
+
+    // MARK: - Restart policy parsing
+
+    /// Parse `deploy.restart_policy` section.
+    private static func parseRestartPolicy(_ deployValue: Any?) -> RestartPolicyConfig? {
+        guard let deploy = deployValue as? [String: Any],
+              let rp = deploy["restart_policy"] as? [String: Any] else { return nil }
+        return RestartPolicyConfig(
+            condition: rp["condition"] as? String,
+            delay: rp["delay"] as? String,
+            maxAttempts: rp["max_attempts"] as? Int,
+            window: rp["window"] as? String
+        )
+    }
+
+    /// Map Docker Compose restart_policy.condition to Docker/mocker restart values.
+    /// - `none` → `no`
+    /// - `any` → `always`
+    /// - `on-failure` → `on-failure`
+    private static func mapRestartCondition(_ condition: String) -> String {
+        switch condition {
+        case "none": return "no"
+        case "any": return "always"
+        default: return condition
+        }
+    }
+}
+
+/// Parsed `deploy.restart_policy` section from a compose file.
+struct RestartPolicyConfig: Sendable {
+    var condition: String?
+    var delay: String?
+    var maxAttempts: Int?
+    var window: String?
 }
 
 /// Build configuration for a compose service.
