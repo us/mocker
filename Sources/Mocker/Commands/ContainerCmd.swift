@@ -16,7 +16,7 @@ struct ContainerCommand: AsyncParsableCommand {
             Remove.self,
             Exec.self,
             Logs.self,
-            Inspect.self,
+            ContainerInspect.self,
             Stats.self,
             Attach.self,
             Rename.self,

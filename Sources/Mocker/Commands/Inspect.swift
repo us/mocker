@@ -54,23 +54,16 @@ struct Inspect: AsyncParsableCommand {
 
         switch Self.resolveKind(type: type) {
         case .image:
-            var results: [MockerKit.ImageInspect] = []
-            for target in targets {
-                let info = try await imageManager.inspect(target, platform: platform)
-                results.append(info)
-            }
+            let results = try await inspectImages(targets: targets, platform: platform, manager: imageManager)
             try TableFormatter.printJSONArray(results, escapeSlashes: false)
 
         case .container:
-            for target in targets {
-                guard let container = try? await engine.inspect(target) else {
-                    throw MockerError.containerNotFound(target)
-                }
+            let results = try await inspectContainers(targets: targets, engine: engine)
+            for container in results {
                 try TableFormatter.printJSONArray(container)
             }
 
         case .auto:
-            // Container-first fallback when --type is not specified
             for target in targets {
                 if let container = try? await engine.inspect(target) {
                     try TableFormatter.printJSONArray(container)
