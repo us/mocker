@@ -21,8 +21,6 @@ struct ContainerInspect: AsyncParsableCommand {
         try config.ensureDirectories()
         let engine = try ContainerEngine(config: config)
         let results = try await inspectContainers(targets: containers, engine: engine)
-        for container in results {
-            try TableFormatter.printJSONArray(container)
-        }
+        try TableFormatter.printJSONArray(results, escapeSlashes: false)
     }
 }

@@ -18,23 +18,23 @@ public func inspectImages(
     return results
 }
 
-/// Inspects each target container and returns the per-target `ContainerInfo` results.
+/// Inspects each target container and returns Docker-compatible `ContainerInspect` results.
 ///
 /// - Parameters:
 ///   - targets: Container names or IDs to inspect.
 ///   - engine: The `ContainerEngine` used to resolve each target.
-/// - Returns: One `ContainerInfo` per target, preserving input order.
+/// - Returns: One `ContainerInspect` per target, preserving input order.
 /// - Throws: `MockerError.containerNotFound` when a target cannot be resolved.
 public func inspectContainers(
     targets: [String],
     engine: ContainerEngine
-) async throws -> [ContainerInfo] {
-    var results: [ContainerInfo] = []
+) async throws -> [ContainerInspect] {
+    var results: [ContainerInspect] = []
     for target in targets {
         guard let container = try? await engine.inspect(target) else {
             throw MockerError.containerNotFound(target)
         }
-        results.append(container)
+        results.append(mapToContainerInspect(container))
     }
     return results
 }

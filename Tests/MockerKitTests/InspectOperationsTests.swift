@@ -17,7 +17,7 @@ struct InspectOperationsTests {
     @Test("inspectContainers exists with documented signature")
     func inspectContainersSignatureExists() async throws {
         let engine = try ContainerEngine(config: MockerConfig())
-        let _: [ContainerInfo] = try await inspectContainers(
+        let _: [ContainerInspect] = try await inspectContainers(
             targets: [],
             engine: engine
         )

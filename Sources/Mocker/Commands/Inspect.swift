@@ -59,14 +59,12 @@ struct Inspect: AsyncParsableCommand {
 
         case .container:
             let results = try await inspectContainers(targets: targets, engine: engine)
-            for container in results {
-                try TableFormatter.printJSONArray(container)
-            }
+            try TableFormatter.printJSONArray(results, escapeSlashes: false)
 
         case .auto:
             for target in targets {
                 if let container = try? await engine.inspect(target) {
-                    try TableFormatter.printJSONArray(container)
+                    try TableFormatter.printJSONArray(mapToContainerInspect(container), escapeSlashes: false)
                 } else {
                     do {
                         let image = try await imageManager.inspect(target, platform: platform)
