@@ -259,13 +259,13 @@ public struct ComposeService: Sendable {
         }
 
         // Parse resource limits: deploy.resources overrides legacy top-level fields
-        let memLimit = parseDeployNested(dict["deploy"], "resources", "limits", "memory") ?? parseStringValue(dict["mem_limit"])
-        let cpus = parseDeployNested(dict["deploy"], "resources", "limits", "cpus") ?? parseCpusValue(dict["cpus"])
-        let memReservation = parseDeployNested(dict["deploy"], "resources", "reservations", "memory") ?? parseStringValue(dict["mem_reservation"])
-        let cpusReservation = parseDeployNested(dict["deploy"], "resources", "reservations", "cpus")
+        let memLimit = parseStringValue(deployLeaf(dict["deploy"], "resources", "limits", "memory")) ?? parseStringValue(dict["mem_limit"])
+        let cpus = parseStringValue(deployLeaf(dict["deploy"], "resources", "limits", "cpus")) ?? parseStringValue(dict["cpus"])
+        let memReservation = parseStringValue(deployLeaf(dict["deploy"], "resources", "reservations", "memory")) ?? parseStringValue(dict["mem_reservation"])
+        let cpusReservation = parseStringValue(deployLeaf(dict["deploy"], "resources", "reservations", "cpus"))
         let memSwapLimit = parseStringValue(dict["memswap_limit"])
         let shmSize = parseStringValue(dict["shm_size"])
-        let pidsLimit = parseIntValue(dict["pids_limit"]) ?? parseDeployInt(dict["deploy"], "resources", "limits", "pids")
+        let pidsLimit = parseIntValue(deployLeaf(dict["deploy"], "resources", "limits", "pids")) ?? parseIntValue(dict["pids_limit"])
 
         // Parse deploy.restart_policy — overrides legacy `restart` field per Compose spec
         let restartPolicy = parseRestartPolicy(dict["deploy"])
@@ -274,7 +274,8 @@ public struct ComposeService: Sendable {
         let restartPolicyMaxAttempts: Int?
         let restartPolicyWindow: String?
         if let rp = restartPolicy {
-            restartValue = rp.condition.map { mapRestartCondition($0) }
+            // A restart_policy without a `condition` still honors the legacy `restart` field.
+            restartValue = rp.condition.map { mapRestartCondition($0) } ?? (dict["restart"] as? String)
             restartPolicyDelay = rp.delay
             restartPolicyMaxAttempts = rp.maxAttempts
             restartPolicyWindow = rp.window
@@ -450,35 +451,16 @@ public struct ComposeService: Sendable {
         return nil
     }
 
-    /// Parse `cpus` — fractional number (`0.5`) or string (`"0.50"`).
-    private static func parseCpusValue(_ value: Any?) -> String? {
-        guard let value else { return nil }
-        if let str = value as? String { return str }
-        if let num = value as? Double { return String(num) }
-        if let num = value as? Int { return String(num) }
-        return nil
-    }
-
-    /// Walk a nested deploy path like `deploy.resources.limits.memory`.
-    private static func parseDeployNested(_ value: Any?, _ path: String...) -> String? {
+    /// Walk a nested deploy path like `deploy.resources.limits.memory` and return the raw leaf node.
+    /// Callers apply `parseStringValue`/`parseIntValue` to coerce it to the type they need.
+    private static func deployLeaf(_ value: Any?, _ path: String...) -> Any? {
         guard let dict = value as? [String: Any] else { return nil }
         var current: Any? = dict
         for key in path {
             guard let d = current as? [String: Any] else { return nil }
             current = d[key]
         }
-        return parseStringValue(current)
-    }
-
-    /// Walk a nested deploy path for integer values like `deploy.resources.limits.pids`.
-    private static func parseDeployInt(_ value: Any?, _ path: String...) -> Int? {
-        guard let dict = value as? [String: Any] else { return nil }
-        var current: Any? = dict
-        for key in path {
-            guard let d = current as? [String: Any] else { return nil }
-            current = d[key]
-        }
-        return parseIntValue(current)
+        return current
     }
 
     // MARK: - Restart policy parsing

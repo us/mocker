@@ -394,6 +394,23 @@ struct ComposeFileTests {
         #expect(compose.services["app"]?.memLimit == "512M")
     }
 
+    @Test("Parse deploy.resources.limits.pids overrides legacy pids_limit")
+    func parseDeployPidsOverridesLegacy() throws {
+        let yaml = """
+        services:
+          app:
+            image: nginx
+            pids_limit: 100
+            deploy:
+              resources:
+                limits:
+                  pids: 200
+        """
+
+        let compose = try ComposeFile.parse(yaml)
+        #expect(compose.services["app"]?.pidsLimit == 200)
+    }
+
     @Test("Parse all resource limits together")
     func parseAllResourceLimits() throws {
         let yaml = """
@@ -507,6 +524,23 @@ struct ComposeFileTests {
         let compose = try ComposeFile.parse(yaml)
         #expect(compose.services["app"]?.restart == "unless-stopped")
         #expect(compose.services["app"]?.restartPolicyDelay == nil)
+    }
+
+    @Test("restart_policy without condition keeps legacy restart")
+    func parseRestartPolicyNoConditionKeepsLegacy() throws {
+        let yaml = """
+        services:
+          app:
+            image: nginx
+            restart: always
+            deploy:
+              restart_policy:
+                delay: 5s
+        """
+
+        let compose = try ComposeFile.parse(yaml)
+        #expect(compose.services["app"]?.restart == "always")
+        #expect(compose.services["app"]?.restartPolicyDelay == "5s")
     }
 
     @Test("Restart policy merge: later overlay wins")
