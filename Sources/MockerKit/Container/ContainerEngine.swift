@@ -519,23 +519,8 @@ public actor ContainerEngine {
         if let data = output.data(using: .utf8),
            let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
            let first = arr.first,
-           let cfg = first["configuration"] as? [String: Any] {
-            let status = first["status"] as? String ?? "running"
-            let networks = first["networks"] as? [[String: Any]] ?? []
-            let addr = networks.first?["address"] as? String ?? ""
-
-            return ContainerInfo(
-                id: (cfg["id"] as? String) ?? id,
-                name: name,  // Use our assigned name, not hostname from inspect
-                image: config.image,
-                state: status == "running" ? .running : .exited,
-                status: status == "running" ? "Up Less than a second" : "Exited (0)",
-                created: Date(),
-                ports: config.ports,
-                labels: config.labels,
-                command: config.command.joined(separator: " "),
-                networkAddress: addr
-            )
+           let info = ContainerEngine.decodeInspect(first, id: id, name: name, config: config) {
+            return info
         }
 
         // Fallback if inspect fails
@@ -630,6 +615,40 @@ public struct ContainerStats: Sendable {
         self.blockIn = blockIn
         self.blockOut = blockOut
         self.pids = pids
+    }
+}
+
+// MARK: - Inspect Decode
+
+extension ContainerEngine {
+    static func decodeInspect(
+        _ first: [String: Any],
+        id: String,
+        name: String,
+        config: ContainerConfig
+    ) -> ContainerInfo? {
+        guard let cfg = first["configuration"] as? [String: Any] else { return nil }
+        let statusObj = first["status"] as? [String: Any]
+        let stateStr = (statusObj?["state"] as? String) ?? "running"
+        let state: ContainerState = stateStr == "stopped" ? .stopped : .running
+        let statusDisplay = state == .running
+            ? "Up Less than a second"
+            : ContainerState.exited.displayString
+        let networks = (statusObj?["networks"] as? [[String: Any]]) ?? []
+        let rawAddr = (networks.first?["ipv4Address"] as? String) ?? ""
+        let addr = rawAddr.split(separator: "/").first.map(String.init) ?? rawAddr
+        return ContainerInfo(
+            id: (cfg["id"] as? String) ?? id,
+            name: name,
+            image: config.image,
+            state: state,
+            status: statusDisplay,
+            created: Date(),
+            ports: config.ports,
+            labels: config.labels,
+            command: config.command.joined(separator: " "),
+            networkAddress: addr
+        )
     }
 }
 
