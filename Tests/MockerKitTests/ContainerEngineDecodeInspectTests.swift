@@ -137,4 +137,14 @@ struct ContainerEngineDecodeInspectTests {
         let result = ContainerEngine.decodeInspect(dict, id: "id1", name: "ctn", config: config)
         #expect(result == nil)
     }
+
+    // MARK: - Display contract
+
+    @Test("ContainerState exited displayString matches expected constant")
+    func exitedDisplayString_matchesExpectedConstant() {
+        // Guards the runtime sync and stop paths that assign
+        // ContainerState.exited.displayString — if the constant ever drifts
+        // back to "Exited (0)" or similar, both paths regress.
+        #expect(ContainerState.exited.displayString == "Exited")
+    }
 }

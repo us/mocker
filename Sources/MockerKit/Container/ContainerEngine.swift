@@ -204,7 +204,7 @@ public actor ContainerEngine {
                 containers[i].status = "Up"
             } else if containers[i].state == .running {
                 containers[i].state = .exited
-                containers[i].status = "Exited (0)"
+                containers[i].status = ContainerState.exited.displayString
                 try await store.save(containers[i])
             }
         }
@@ -232,7 +232,7 @@ public actor ContainerEngine {
 
         var updated = container
         updated.state = .exited
-        updated.status = "Exited (0)"
+        updated.status = ContainerState.exited.displayString
         try await store.save(updated)
         return updated
     }
