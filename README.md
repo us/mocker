@@ -40,47 +40,7 @@ Your existing `docker-compose.yml` works as-is.
 
 ## What's New
 
-### v0.4.0 — Docker-compatible image inspect
-- **Docker-compatible `ImageInspect` output** — `mocker image inspect` and `mocker inspect --type image` now emit the same Docker-shaped JSON array with PascalCase keys.
-- **Real image metadata** — image inspect now reads OCI manifest/config data for `Size`, `Created`, `Architecture`, `Os`, `Config`, `RootFS`, repo tags, and repo digests instead of returning stubbed values.
-- **Inspect routing fixes** — `mocker inspect --type image|container` now validates type values, and `--platform` is honored for image inspection.
-- **Compose fixes** — published ports are forwarded correctly and `compose -f ... up` works when `-f` appears before the subcommand.
-- **BREAKING**: image inspect output changed from the old lowercase `ImageInfo` object shape to Docker-compatible `ImageInspect` arrays; `MockerKit.ImageManager.inspect(_:platform:)` now returns `ImageInspect`.
-
-### v0.3.0 — Multi-arch images
-- **`mocker manifest`** subcommand group — `create`, `inspect`, `add`, `rm`, `annotate`, `push` for assembling and publishing OCI image indexes (multi-arch manifest lists). Pure-Swift via Containerization, no skopeo required (closes #9, #11)
-- **Multi-platform builds** — `mocker build --platform linux/amd64 --platform linux/arm64 -t img:tag .` produces a single multi-arch image
-- **`--platform` wired through `pull`/`push`** — hardcoded `arm64` removed; specify any supported platform
-- **Apple container CLI store auto-detection** — mocker reads from `~/Library/Application Support/com.apple.container/` by default
-- **BREAKING**: `MockerKit` consumers calling `ImageManager.build(platform:)` must migrate to `build(platforms:)`
-- Exotic architectures (ppc64le, s390x, riscv64) — layer-only Dockerfiles work; `RUN` steps blocked upstream by [apple/container#1496](https://github.com/apple/container/issues/1496) — see "Building for exotic architectures"
-
-### v0.2.1 — Nested virtualization
-- **`--virtualization` / `--kernel`** for `mocker run` and `mocker create` — expose nested virtualization to containers (closes #4)
-
-### v0.2.0 — Ground Truth
-- **Honesty layer** — unsupported commands return explicit errors instead of silently mutating state
-- **Security**: shell-injection fixes in `copyToContainer` and compose hostname injection
-- Forward Apple CLI flags in `run` (`-i`, `-t`, `--cidfile`, `--rm`, `--platform`, ...) and `build` (`--label`, `--quiet`, `--progress`, `--output`)
-- Test infrastructure: `ProcessRunner` protocol + 16 new tests (42 total)
-
-### v0.1.9 — Full Docker CLI Flag Compatibility
-- **111 commands/subcommands** with Docker-matching flags
-- `run`/`create`: ~50 new flags (`--attach`, `--cpu-shares`, `--gpus`, `--init`, `--memory`, `--privileged`, `--restart`, `--shm-size`, `--ulimit`, etc.)
-- `build`: ~25 BuildKit/Buildx flags (`--cache-from`, `--load`, `--push`, `--secret`, `--ssh`, etc.)
-- `compose`: ~200+ flags across 22 subcommands
-- New commands: `commit`, `container prune`, `container export`, `image rm/inspect/prune`
-- Full [COMMANDS.md](COMMANDS.md) reference and [CHANGELOG.md](CHANGELOG.md) added
-
-### v0.1.8 — `--env-file` support
-- **`mocker run --env-file .env`** — load environment variables from file, just like Docker
-
-### v0.1.7 — Compose improvements & `--rm` flag
-- **`mocker run --rm`** — auto-remove container on exit
-- `compose.yaml` / `compose.yml` recognized as default compose file
-- Compose `${VAR:-default}` variable substitution fix
-
-> See [CHANGELOG.md](CHANGELOG.md) for the full version history.
+See the **[CHANGELOG](CHANGELOG.md)** for the full, always-current release history — it is regenerated automatically on every release.
 
 ## Features
 

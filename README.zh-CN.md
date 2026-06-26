@@ -37,39 +37,7 @@ mocker exec -it my-app sh
 
 ## 最新更新
 
-### v0.4.0 — Docker 兼容的镜像检查
-- **Docker 兼容的 `ImageInspect` 输出** — `mocker image inspect` 和 `mocker inspect --type image` 现在输出相同的 Docker 风格 JSON 数组，并使用 PascalCase 字段名。
-- **真实镜像元数据** — 镜像检查会读取 OCI manifest/config 中的 `Size`、`Created`、`Architecture`、`Os`、`Config`、`RootFS`、repo tags 和 repo digests，不再返回占位值。
-- **Inspect 路由修复** — `mocker inspect --type image|container` 会校验类型值，镜像检查也会正确处理 `--platform`。
-- **Compose 修复** — 发布端口会被正确转发，且 `compose -f ... up` 支持在子命令前传入 `-f`。
-- **BREAKING**：镜像检查输出从旧的 lowercase `ImageInfo` 对象变为 Docker 兼容的 `ImageInspect` 数组；`MockerKit.ImageManager.inspect(_:platform:)` 现在返回 `ImageInspect`。
-
-### v0.2.1 — 嵌套虚拟化
-- **`--virtualization` / `--kernel`** 适用于 `mocker run` 和 `mocker create` — 向容器暴露嵌套虚拟化能力（closes #4）
-
-### v0.2.0 — Ground Truth
-- **诚实层** — 不支持的命令返回明确错误，不再静默修改本地状态
-- **安全**：修复 `copyToContainer` 和 compose 主机名注入中的 shell 注入漏洞
-- 在 `run`（`-i`、`-t`、`--cidfile`、`--rm`、`--platform` 等）和 `build`（`--label`、`--quiet`、`--progress`、`--output`）中转发 Apple CLI 参数
-- 测试基础设施：`ProcessRunner` 协议 + 16 个新测试（共 42 个）
-
-### v0.1.9 — 完整 Docker CLI 参数兼容
-- **111 个命令/子命令**与 Docker 参数匹配
-- `run`/`create`：新增约 50 个参数（`--attach`、`--cpu-shares`、`--gpus`、`--init`、`--memory`、`--privileged`、`--restart`、`--shm-size`、`--ulimit` 等）
-- `build`：新增约 25 个 BuildKit/Buildx 参数（`--cache-from`、`--load`、`--push`、`--secret`、`--ssh` 等）
-- `compose`：22 个子命令共新增 200+ 个参数
-- 新命令：`commit`、`container prune`、`container export`、`image rm/inspect/prune`
-- 添加完整的 [COMMANDS.md](COMMANDS.md) 参考文档和 [CHANGELOG.md](CHANGELOG.md)
-
-### v0.1.8 — `--env-file` 支持
-- **`mocker run --env-file .env`** — 从文件加载环境变量，与 Docker 用法一致
-
-### v0.1.7 — Compose 改进 & `--rm` 参数
-- **`mocker run --rm`** — 容器退出后自动删除
-- `compose.yaml` / `compose.yml` 现已被识别为默认 compose 文件
-- Compose `${VAR:-default}` 变量替换修复
-
-> 查看 [CHANGELOG.md](CHANGELOG.md) 了解完整版本历史。
+完整且始终最新的版本历史请查看 **[CHANGELOG](CHANGELOG.md)** — 每次发布都会自动重新生成。
 
 ## 功能特性
 
