@@ -11,7 +11,7 @@ struct ContainerInspect: AsyncParsableCommand {
     var containers: [String]
 
     @Option(name: .shortAndLong, help: "Format output using a custom template")
-    var format: String?
+    var format: String?  // --format accepted for Docker surface parity but not yet applied; Go-template formatting will be wired up in the follow-up (PR 2)
 
     @Flag(name: .shortAndLong, help: "Display total file sizes")
     var size = false  // --size accepted for Docker compatibility but no-op; wire up when ContainerEngine surfaces size data (PR 2)
