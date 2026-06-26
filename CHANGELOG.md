@@ -12,6 +12,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **image inspect:** `mocker image inspect` and `mocker inspect --type=image` now return Docker-compatible `ImageInspect` JSON arrays with PascalCase keys instead of the previous lowercase `ImageInfo` object shape.
 * **MockerKit:** `ImageManager.inspect(_:platform:)` returns `ImageInspect` instead of `ImageInfo`.
 
+## [0.5.1](https://github.com/us/mocker/compare/v0.5.0...v0.5.1) (2026-06-26)
+
+
+### Features
+
+* **compose:** parse deploy.restart_policy and wire restartPolicy through orchestrator ([656a845](https://github.com/us/mocker/commit/656a845013de06ed4637a2c23b750363b7f8eca6))
+* **compose:** parse resource limits (mem_limit, cpus, deploy.resources) and forward to container runtime ([1918762](https://github.com/us/mocker/commit/191876203205fb2b2ed6f7b823837beff12b51a1))
+
+
+### Bug Fixes
+
+* **compose:** sanitize fractional cpu counts for Apple container CLI ([781a04a](https://github.com/us/mocker/commit/781a04a9303865abc53b69fe6cdd3d388c21db9c))
+
 ## [0.5.0](https://github.com/us/mocker/compare/v0.4.1...v0.5.0) (2026-06-22)
 
 
