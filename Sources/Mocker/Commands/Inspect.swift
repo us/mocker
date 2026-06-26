@@ -55,20 +55,20 @@ struct Inspect: AsyncParsableCommand {
         switch Self.resolveKind(type: type) {
         case .image:
             let results = try await inspectImages(targets: targets, platform: platform, manager: imageManager)
-            try TableFormatter.printJSONArray(results, escapeSlashes: false)
+            try InspectFormat.emitArray(results, format: format)
 
         case .container:
             let results = try await inspectContainers(targets: targets, engine: engine)
-            try TableFormatter.printJSONArray(results, escapeSlashes: false)
+            try InspectFormat.emitArray(results, format: format)
 
         case .auto:
             for target in targets {
                 if let container = try? await engine.inspect(target) {
-                    try TableFormatter.printJSONArray(mapToContainerInspect(container), escapeSlashes: false)
+                    try InspectFormat.emitOne(mapToContainerInspect(container), format: format)
                 } else {
                     do {
                         let image = try await imageManager.inspect(target, platform: platform)
-                        try TableFormatter.printJSONArray(image, escapeSlashes: false)
+                        try InspectFormat.emitOne(image, format: format)
                     } catch {
                         if platform != nil {
                             throw error

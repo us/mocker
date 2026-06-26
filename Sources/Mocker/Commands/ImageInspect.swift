@@ -21,6 +21,6 @@ struct ImageInspect: AsyncParsableCommand {
     func run() async throws {
         let manager = try ImageManager(config: MockerConfig())
         let results = try await inspectImages(targets: images, platform: platform, manager: manager)
-        try TableFormatter.printJSONArray(results, escapeSlashes: false)
+        try InspectFormat.emitArray(results, format: format)
     }
 }
