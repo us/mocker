@@ -28,7 +28,7 @@ import Foundation
 
 /// Raised when an `inspect --format` template uses a construct outside the supported
 /// `{{ .Dotted.Path }}` field-access subset.
-enum GoTemplateError: Error, CustomStringConvertible {
+enum GoTemplateError: Error, LocalizedError, CustomStringConvertible {
     case unsupportedAction(String)
 
     var description: String {
@@ -38,6 +38,11 @@ enum GoTemplateError: Error, CustomStringConvertible {
                 + "like {{ .State.Running }} is supported (no if/range/pipelines/functions)"
         }
     }
+
+    // ArgumentParser prints thrown errors via `localizedDescription`, which only honors
+    // LocalizedError — without this the helpful message above is replaced by a generic
+    // "The operation couldn't be completed" string (matches MockerError's pattern).
+    var errorDescription: String? { description }
 }
 
 enum GoTemplate {
