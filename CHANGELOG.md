@@ -12,6 +12,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **image inspect:** `mocker image inspect` and `mocker inspect --type=image` now return Docker-compatible `ImageInspect` JSON arrays with PascalCase keys instead of the previous lowercase `ImageInfo` object shape.
 * **MockerKit:** `ImageManager.inspect(_:platform:)` returns `ImageInspect` instead of `ImageInfo`.
 
+## [0.5.3](https://github.com/us/mocker/compare/v0.5.2...v0.5.3) (2026-06-27)
+
+
+### Features
+
+* **inspect:** evaluate -f/--format as a Go-template across all inspect commands ([df10b86](https://github.com/us/mocker/commit/df10b865ffc43d3fafad607296bb79a76085901d))
+
+
+### Bug Fixes
+
+* decode Apple inspect state object and nested ipv4 address ([ee030ae](https://github.com/us/mocker/commit/ee030ae41d2c17155fa24d146dfb438af8c7f435))
+* drop fake exit code from stopped container display ([c64fd47](https://github.com/us/mocker/commit/c64fd471b4b0682b909c4444dca70c22d80a4c0b))
+* **inspect:** surface unsupported-template error via LocalizedError ([804b370](https://github.com/us/mocker/commit/804b3701571f08d72ce80d41ffa3ee4c52b08c66))
+
 ## [0.5.2](https://github.com/us/mocker/compare/v0.5.1...v0.5.2) (2026-06-26)
 
 
