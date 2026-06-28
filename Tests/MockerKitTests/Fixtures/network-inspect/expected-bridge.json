@@ -1,0 +1,35 @@
+{
+  "Attachable" : false,
+  "ConfigFrom" : {
+    "Network" : ""
+  },
+  "ConfigOnly" : false,
+  "Containers" : {
+
+  },
+  "Created" : "2025-06-01T12:00:00.000Z",
+  "Driver" : "bridge",
+  "EnableIPv4" : true,
+  "EnableIPv6" : false,
+  "IPAM" : {
+    "Config" : [
+      {
+        "Gateway" : "192.168.64.1",
+        "Subnet" : "192.168.64.0\/24"
+      }
+    ],
+    "Driver" : "default",
+    "Options" : null
+  },
+  "Id" : "abc123def456789012345678901234567890abcd",
+  "Ingress" : false,
+  "Internal" : false,
+  "Labels" : {
+
+  },
+  "Name" : "bridge",
+  "Options" : {
+
+  },
+  "Scope" : "local"
+}

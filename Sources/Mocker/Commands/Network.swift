@@ -171,23 +171,21 @@ struct NetworkRemove: AsyncParsableCommand {
 struct NetworkInspect: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "inspect",
-        abstract: "Display detailed information on a network"
+        abstract: "Display detailed information on one or more networks"
     )
 
     @Option(name: .shortAndLong, help: "Format output using the given Go template")
     var format: String?
 
-    @Flag(name: .shortAndLong, help: "Verbose output for diagnostics")
-    var verbose = false
-
-    @Argument(help: "Network name")
-    var name: String
+    @Argument(help: "Network name or ID")
+    var names: [String]
 
     func run() async throws {
         let config = MockerConfig()
+        try config.ensureDirectories()
         let manager = try NetworkManager(config: config)
-        let network = try await manager.inspect(name)
-        try TableFormatter.printJSON(network)
+        let results = try await inspectNetworks(targets: names, manager: manager)
+        try InspectFormat.emitArray(results, format: format)
     }
 }
 
