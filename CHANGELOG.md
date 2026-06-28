@@ -12,6 +12,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **image inspect:** `mocker image inspect` and `mocker inspect --type=image` now return Docker-compatible `ImageInspect` JSON arrays with PascalCase keys instead of the previous lowercase `ImageInfo` object shape.
 * **MockerKit:** `ImageManager.inspect(_:platform:)` returns `ImageInspect` instead of `ImageInfo`.
 
+## [0.5.4](https://github.com/us/mocker/compare/v0.5.3...v0.5.4) (2026-06-28)
+
+
+### Features
+
+* **serve:** Docker Engine API daemon foundation (mocker serve) ([b110ad2](https://github.com/us/mocker/commit/b110ad2d2cc3c66deb21667ad38e6ed6d07d0400))
+* **serve:** engine-backed read endpoints (docker ps, images, info, inspect) ([62179e4](https://github.com/us/mocker/commit/62179e45e04f51b5066ba67cf76de12632032ce7))
+
+
+### Bug Fixes
+
+* **engine:** drain runCLI output concurrently to avoid large-output deadlock ([2694c42](https://github.com/us/mocker/commit/2694c42a453599b319b707599f01e9666ff0111e))
+
 ## [0.5.3](https://github.com/us/mocker/compare/v0.5.2...v0.5.3) (2026-06-27)
 
 
