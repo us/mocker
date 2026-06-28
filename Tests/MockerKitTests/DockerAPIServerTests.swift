@@ -59,6 +59,54 @@ struct DockerAPIServerTests {
         #expect(perms?.int16Value == 0o700)
     }
 
+    // MARK: - Docker list-item mappers (shapes differ from inspect — wrong types break docker ps)
+
+    @Test("mapToContainerListItem emits the Docker ContainerSummary shape & types")
+    func containerListItem() {
+        let c = ContainerInfo(
+            id: "abc", name: "web", image: "nginx:latest", state: .running, status: "Up 2m",
+            created: Date(timeIntervalSince1970: 1_700_000_000),
+            ports: [PortMapping(hostPort: 8080, containerPort: 80, portProtocol: .tcp)],
+            labels: ["a": "b"], command: "nginx -g daemon", pid: 1, networkAddress: "10.0.0.1")
+        let m = mapToContainerListItem(c)
+        #expect(m["Id"] as? String == "abc")
+        #expect(m["Names"] as? [String] == ["/web"])      // leading slash
+        #expect(m["Command"] as? String == "nginx -g daemon")  // STRING, not array
+        #expect(m["Created"] as? Int == 1_700_000_000)    // unix int, not RFC3339
+        #expect(m["State"] as? String == "running")       // lowercase string
+        let port = (m["Ports"] as? [[String: Any]])?.first
+        #expect(port?["PrivatePort"] as? Int == 80)       // INT, not string
+        #expect(port?["PublicPort"] as? Int == 8080)
+        #expect(port?["Type"] as? String == "tcp")
+    }
+
+    @Test("stopped container maps State to Docker 'exited'")
+    func containerListExited() {
+        let c = ContainerInfo(id: "x", name: "w", image: "i", state: .stopped, status: "Exited",
+                              created: Date(), ports: [], labels: [:], command: "", pid: nil, networkAddress: "")
+        #expect(mapToContainerListItem(c)["State"] as? String == "exited")
+    }
+
+    @Test("mapToImageListItem emits the Docker ImageSummary shape")
+    func imageListItem() {
+        let i = ImageInfo(id: "deadbeef", repository: "nginx", tag: "latest", size: 1234,
+                          created: Date(timeIntervalSince1970: 1_700_000_000), labels: [:])
+        let m = mapToImageListItem(i)
+        #expect(m["Id"] as? String == "sha256:deadbeef")  // sha256-prefixed
+        #expect(m["RepoTags"] as? [String] == ["nginx:latest"])
+        #expect(m["Created"] as? Int == 1_700_000_000)
+        #expect(m["Size"] as? Int == 1234)
+        #expect(m["SharedSize"] as? Int == -1)
+    }
+
+    @Test("image with existing sha256 id is not double-prefixed; empty repo → <none>")
+    func imageListEdge() {
+        let i = ImageInfo(id: "sha256:abc", repository: "", tag: "", size: 0, created: Date(), labels: [:])
+        let m = mapToImageListItem(i)
+        #expect(m["Id"] as? String == "sha256:abc")
+        #expect(m["RepoTags"] as? [String] == ["<none>:<none>"])
+    }
+
     // MARK: - The runCLI drain fix: large output must not deadlock
 
     /// `runCLI` is private + bound to the container binary, so this reproduces its EXACT pattern

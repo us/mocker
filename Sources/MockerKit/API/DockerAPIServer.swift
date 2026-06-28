@@ -17,29 +17,33 @@ struct DockerAPIError: Error, CustomStringConvertible {
 }
 
 /// A Docker Engine API server over a Unix domain socket, backed by MockerKit.
-/// Phase 1 (read-only): `/_ping`, `/version`. Handlers grow per the plan.
+/// Phase 1 (read-only): ping/version/info + container & image LIST/INSPECT.
 public final class DockerAPIServer: @unchecked Sendable {
     private let socketPath: String
     private let mockerVersion: String
+    private let engine: ContainerEngine
+    private let images: ImageManager
     private var group: MultiThreadedEventLoopGroup?
     private var channel: Channel?
 
-    public init(socketPath: String, mockerVersion: String) {
+    public init(socketPath: String, mockerVersion: String, engine: ContainerEngine, images: ImageManager) {
         self.socketPath = socketPath
         self.mockerVersion = mockerVersion
+        self.engine = engine
+        self.images = images
     }
 
     public func run() async throws {
         try Self.prepareSocketPath(socketPath)
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         self.group = group
-        let version = mockerVersion
+        let version = mockerVersion, engine = self.engine, images = self.images
         let bootstrap = ServerBootstrap(group: group)
             .serverChannelOption(ChannelOptions.backlog, value: 256)
             .serverChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
             .childChannelInitializer { channel in
                 channel.pipeline.configureHTTPServerPipeline().flatMap {
-                    channel.pipeline.addHandler(HTTPHandler(mockerVersion: version))
+                    channel.pipeline.addHandler(HTTPHandler(mockerVersion: version, engine: engine, images: images))
                 }
             }
         // cleanupExistingSocketFile:false — NIO's cleanup uses stat() with no owner/symlink check;
@@ -73,85 +77,163 @@ public final class DockerAPIServer: @unchecked Sendable {
     }
 }
 
-/// Per-connection HTTP handler. Phase 1 routes are static (no engine), so fully synchronous.
-/// `@unchecked Sendable`: a ChannelHandler is confined to its own event loop; its mutable state
-/// (`reqHead`) is only touched there.
+/// Per-connection HTTP handler. Engine-backed routes hop to an async `Task` and write back via the
+/// **Channel** (thread-safe), never the `ChannelHandlerContext` (event-loop only — Swift 6 unsafe).
+/// `@unchecked Sendable`: a ChannelHandler is confined to its own event loop; engine/images are
+/// actors (Sendable), and `reqHead` is only touched on the loop.
 final class HTTPHandler: ChannelInboundHandler, @unchecked Sendable {
     typealias InboundIn = HTTPServerRequestPart
     typealias OutboundOut = HTTPServerResponsePart
 
     private let mockerVersion: String
+    private let engine: ContainerEngine
+    private let images: ImageManager
     private var reqHead: HTTPRequestHead?
 
-    init(mockerVersion: String) { self.mockerVersion = mockerVersion }
+    init(mockerVersion: String, engine: ContainerEngine, images: ImageManager) {
+        self.mockerVersion = mockerVersion
+        self.engine = engine
+        self.images = images
+    }
 
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         switch unwrapInboundIn(data) {
         case .head(let head): reqHead = head
-        case .body: break  // Phase 1 endpoints take no body
+        case .body: break  // read endpoints take no body
         case .end:
             guard let head = reqHead else { return }
-            route(context: context, head: head)
+            route(channel: context.channel, head: head)
             reqHead = nil
         }
     }
 
-    private func route(context: ChannelHandlerContext, head: HTTPRequestHead) {
+    private func route(channel: Channel, head: HTTPRequestHead) {
         let path = Self.normalizePath(head.uri)
+        let query = Self.parseQuery(head.uri)
         switch (head.method, path) {
         case (.GET, "/_ping"), (.HEAD, "/_ping"):
-            writePing(context, head: head)
+            respondPing(channel, head)
         case (.GET, "/version"):
-            writeJSON(context, head: head, status: .ok, object: versionJSON())
+            respondJSON(channel, head, .ok, versionJSON())
+        case (.GET, "/info"):
+            Task { self.respondJSON(channel, head, .ok, await self.infoJSON()) }
+        case (.GET, "/containers/json"):
+            let all = ["1", "true", "True"].contains(query["all"] ?? "false")
+            Task {
+                do { self.respondJSON(channel, head, .ok, try await self.engine.list(all: all).map(mapToContainerListItem)) }
+                catch { self.respondError(channel, head, .internalServerError, "\(error)") }
+            }
+        case (.GET, "/images/json"):
+            Task {
+                do { self.respondJSON(channel, head, .ok, try await self.images.list().map(mapToImageListItem)) }
+                catch { self.respondError(channel, head, .internalServerError, "\(error)") }
+            }
+        case (.GET, let p) where p.hasPrefix("/containers/") && p.hasSuffix("/json") && p != "/containers/json":
+            let id = String(p.dropFirst("/containers/".count).dropLast("/json".count))
+            Task {
+                if let info = try? await self.engine.inspect(id) {
+                    self.respondEncodable(channel, head, .ok, mapToContainerInspect(info))
+                } else {
+                    self.respondError(channel, head, .notFound, "No such container: \(id)")
+                }
+            }
         default:
-            writeJSON(context, head: head, status: .notFound, object: ["message": "page not found: \(path)"])
+            respondError(channel, head, .notFound, "page not found: \(path)")
         }
     }
 
-    // MARK: responses
+    // MARK: - /info & /version bodies
 
-    private func writePing(_ context: ChannelHandlerContext, head: HTTPRequestHead) {
-        let isHead = head.method == .HEAD
+    private func infoJSON() async -> [String: Any] {
+        let containers = (try? await engine.list(all: true)) ?? []
+        let running = containers.filter { $0.state == .running }.count
+        let imageCount = ((try? await images.list()) ?? []).count
+        return [
+            "ID": "MOCKER",
+            "Containers": containers.count,
+            "ContainersRunning": running,
+            "ContainersPaused": 0,
+            "ContainersStopped": containers.count - running,
+            "Images": imageCount,
+            "Driver": "apple-container",
+            "DockerRootDir": "/var/lib/mocker",
+            "OSType": "linux",
+            "OperatingSystem": "Apple Containerization",
+            "Architecture": "aarch64",
+            "NCPU": ProcessInfo.processInfo.processorCount,
+            "MemTotal": Int(ProcessInfo.processInfo.physicalMemory),
+            "ServerVersion": mockerVersion,
+            "DefaultRuntime": "runc",
+            "Name": Host.current().localizedName ?? "mocker",
+            "IndexServerAddress": "https://index.docker.io/v1/",
+        ]
+    }
+
+    private func versionJSON() -> [String: Any] {
+        [
+            "Platform": ["Name": "mocker"],
+            "Version": mockerVersion,
+            "ApiVersion": DockerAPI.version,
+            "MinAPIVersion": DockerAPI.minVersion,
+            "Os": "linux",
+            "Arch": "arm64",
+            "Experimental": false,
+            // `docker version`'s Server/Engine block reads OS-Arch, min-version, etc. from the
+            // component Details, not the top-level fields — populate them so it isn't blank.
+            "Components": [
+                [
+                    "Name": "Engine", "Version": mockerVersion,
+                    "Details": [
+                        "ApiVersion": DockerAPI.version, "MinAPIVersion": DockerAPI.minVersion,
+                        "Os": "linux", "Arch": "arm64", "Experimental": "false",
+                    ],
+                ]
+            ],
+        ]
+    }
+
+    // MARK: - Responses (Channel-based, safe to call from an async Task)
+
+    private func respondPing(_ channel: Channel, _ head: HTTPRequestHead) {
         var headers = baseHeaders()
         headers.add(name: "OSType", value: "linux")
         headers.add(name: "Builder-Version", value: "1")
         headers.add(name: "Swarm", value: "inactive")
         headers.add(name: "Cache-Control", value: "no-cache, no-store, must-revalidate")
         headers.add(name: "Pragma", value: "no-cache")
-        headers.add(name: "Content-Type", value: "text/plain; charset=utf-8")
-        let body = "OK"
-        headers.add(name: "Content-Length", value: String(isHead ? 0 : body.utf8.count))
-        context.write(wrapOutboundOut(.head(.init(version: head.version, status: .ok, headers: headers))), promise: nil)
-        if !isHead {
-            var buf = context.channel.allocator.buffer(capacity: body.utf8.count)
-            buf.writeString(body)
-            context.write(wrapOutboundOut(.body(.byteBuffer(buf))), promise: nil)
-        }
-        finish(context, head: head)
+        write(channel, head, status: .ok, contentType: "text/plain; charset=utf-8", body: Data("OK".utf8), headers: headers)
     }
 
-    private func writeJSON(_ context: ChannelHandlerContext, head: HTTPRequestHead, status: HTTPResponseStatus, object: [String: Any]) {
+    private func respondJSON(_ channel: Channel, _ head: HTTPRequestHead, _ status: HTTPResponseStatus, _ value: Any) {
+        write(channel, head, status: status, contentType: "application/json", body: Self.jsonData(value), headers: baseHeaders())
+    }
+
+    private func respondEncodable<T: Encodable>(_ channel: Channel, _ head: HTTPRequestHead, _ status: HTTPResponseStatus, _ value: T) {
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let body = (try? enc.encode(value)) ?? Data("{}".utf8)
+        write(channel, head, status: status, contentType: "application/json", body: body, headers: baseHeaders())
+    }
+
+    /// Docker error shape: `{"message": "..."}`.
+    private func respondError(_ channel: Channel, _ head: HTTPRequestHead, _ status: HTTPResponseStatus, _ message: String) {
+        respondJSON(channel, head, status, ["message": message])
+    }
+
+    private func write(_ channel: Channel, _ head: HTTPRequestHead, status: HTTPResponseStatus, contentType: String, body: Data, headers baseHeaders: HTTPHeaders) {
         let isHead = head.method == .HEAD
-        let data = Self.jsonData(object)
-        var headers = baseHeaders()
-        headers.add(name: "Content-Type", value: "application/json")
-        headers.add(name: "Content-Length", value: String(isHead ? 0 : data.count))
-        context.write(wrapOutboundOut(.head(.init(version: head.version, status: status, headers: headers))), promise: nil)
+        var headers = baseHeaders
+        headers.add(name: "Content-Type", value: contentType)
+        headers.add(name: "Content-Length", value: String(isHead ? 0 : body.count))
+        let respHead = HTTPResponseHead(version: head.version, status: status, headers: headers)
+        channel.write(HTTPServerResponsePart.head(respHead), promise: nil)
         if !isHead {
-            var buf = context.channel.allocator.buffer(capacity: data.count)
-            buf.writeBytes(data)
-            context.write(wrapOutboundOut(.body(.byteBuffer(buf))), promise: nil)
+            var buf = channel.allocator.buffer(capacity: body.count)
+            buf.writeBytes(body)
+            channel.write(HTTPServerResponsePart.body(.byteBuffer(buf)), promise: nil)
         }
-        finish(context, head: head)
-    }
-
-    /// Serialize a JSON object with **unescaped slashes** — Docker emits `docker.io/library/...`,
-    /// not `docker.io\/library\/...`. `JSONSerialization` always escapes `/`, so undo it (it only
-    /// ever produces `\/` for a forward slash, so the replace is safe).
-    static func jsonData(_ object: [String: Any]) -> Data {
-        guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
-              let str = String(data: data, encoding: .utf8) else { return Data("{}".utf8) }
-        return Data(str.replacingOccurrences(of: "\\/", with: "/").utf8)
+        let done = channel.writeAndFlush(HTTPServerResponsePart.end(nil))
+        if !head.isKeepAlive { done.whenComplete { _ in channel.close(promise: nil) } }
     }
 
     /// `Api-Version` (+ `Docker-Experimental`) on EVERY response — if absent the Go client falls
@@ -163,40 +245,13 @@ final class HTTPHandler: ChannelInboundHandler, @unchecked Sendable {
         return h
     }
 
-    private func finish(_ context: ChannelHandlerContext, head: HTTPRequestHead) {
-        context.writeAndFlush(wrapOutboundOut(.end(nil)), promise: nil)
-        if !head.isKeepAlive { context.close(promise: nil) }
-    }
-
-    private func versionJSON() -> [String: Any] {
-        [
-            "Platform": ["Name": "mocker"],
-            "Version": mockerVersion,
-            "ApiVersion": DockerAPI.version,
-            "MinAPIVersion": DockerAPI.minVersion,
-            "Os": "linux",
-            "Arch": "arm64",
-            "KernelVersion": "",
-            "GoVersion": "",
-            "GitCommit": "",
-            "BuildTime": "",
-            "Experimental": false,
-            // `docker version`'s Server/Engine block reads OS-Arch, min-version, etc. from the
-            // component Details, not the top-level fields — populate them so it isn't blank.
-            "Components": [
-                [
-                    "Name": "Engine",
-                    "Version": mockerVersion,
-                    "Details": [
-                        "ApiVersion": DockerAPI.version,
-                        "MinAPIVersion": DockerAPI.minVersion,
-                        "Os": "linux",
-                        "Arch": "arm64",
-                        "Experimental": "false",
-                    ],
-                ]
-            ],
-        ]
+    /// Serialize a JSON value (object OR array) with **unescaped slashes** for Docker parity.
+    /// `JSONSerialization` always escapes `/`, so undo it (it only ever produces `\/` for a slash).
+    static func jsonData(_ value: Any) -> Data {
+        guard JSONSerialization.isValidJSONObject(value),
+              let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
+              let str = String(data: data, encoding: .utf8) else { return Data("{}".utf8) }
+        return Data(str.replacingOccurrences(of: "\\/", with: "/").utf8)
     }
 
     /// Strip a query string and a leading `/vX.YY` version prefix (clients pin versions into the
@@ -214,5 +269,18 @@ final class HTTPHandler: ChannelInboundHandler, @unchecked Sendable {
             }
         }
         return p
+    }
+
+    /// Parse the query string into a dict (best-effort, last value wins; percent-decoded).
+    static func parseQuery(_ uri: String) -> [String: String] {
+        guard let q = uri.firstIndex(of: "?") else { return [:] }
+        var out: [String: String] = [:]
+        for pair in uri[uri.index(after: q)...].split(separator: "&") {
+            let kv = pair.split(separator: "=", maxSplits: 1)
+            let key = String(kv[0]).removingPercentEncoding ?? String(kv[0])
+            let val = kv.count > 1 ? (String(kv[1]).removingPercentEncoding ?? String(kv[1])) : ""
+            out[key] = val
+        }
+        return out
     }
 }

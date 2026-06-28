@@ -13,7 +13,12 @@ struct Serve: AsyncParsableCommand {
 
     func run() async throws {
         let path = socket ?? Self.defaultSocketPath()
-        let server = DockerAPIServer(socketPath: path, mockerVersion: Version.currentVersion)
+        let config = MockerConfig()
+        try config.ensureDirectories()
+        let engine = try ContainerEngine(config: config)
+        let images = try ImageManager(config: config)
+        let server = DockerAPIServer(
+            socketPath: path, mockerVersion: Version.currentVersion, engine: engine, images: images)
 
         // Graceful shutdown: unlink the socket + stop NIO on Ctrl-C / SIGTERM.
         signal(SIGINT, SIG_IGN)
