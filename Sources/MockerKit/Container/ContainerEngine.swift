@@ -563,14 +563,23 @@ public actor ContainerEngine {
 
         try process.run()
 
-        return await withCheckedContinuation { continuation in
-            process.terminationHandler = { p in
-                let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                let err = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                let combined = out.isEmpty ? err : out
-                continuation.resume(returning: (combined, p.terminationStatus))
-            }
+        // Drain stdout/stderr concurrently while the process runs. Reading only inside
+        // terminationHandler deadlocks when output exceeds the ~64KB pipe buffer: the child
+        // blocks on write before it can exit, so the handler never fires (e.g. a large
+        // `container ls`/`inspect` from the API server). readDataToEndOfFile returns at EOF,
+        // which the OS delivers when the process exits and closes the pipe.
+        let outHandle = pipe.fileHandleForReading
+        let errHandle = errPipe.fileHandleForReading
+        let outTask = Task.detached { outHandle.readDataToEndOfFile() }
+        let errTask = Task.detached { errHandle.readDataToEndOfFile() }
+
+        let status: Int32 = await withCheckedContinuation { continuation in
+            process.terminationHandler = { p in continuation.resume(returning: p.terminationStatus) }
         }
+        let out = String(data: await outTask.value, encoding: .utf8) ?? ""
+        let err = String(data: await errTask.value, encoding: .utf8) ?? ""
+        let combined = out.isEmpty ? err : out
+        return (combined, status)
     }
 
     private func generateID() -> String {
