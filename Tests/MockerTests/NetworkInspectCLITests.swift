@@ -43,4 +43,9 @@ struct NetworkInspectCLITests {
     func verboseFlagRemoved() throws {
         #expect(throws: Error.self) { _ = try NetworkInspect.parse(["--verbose", "mynet"]) }
     }
+
+    @Test("resolveKind maps .network to Kind.network")
+    func resolveKindNetwork() {
+        #expect(Inspect.resolveKind(type: .network) == .network)
+    }
 }

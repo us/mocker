@@ -4,6 +4,7 @@ import MockerKit
 enum InspectObjectType: String, ExpressibleByArgument {
     case image
     case container
+    case network
 }
 
 struct Inspect: AsyncParsableCommand {
@@ -30,6 +31,7 @@ struct Inspect: AsyncParsableCommand {
     enum Kind: Equatable {
         case image
         case container
+        case network
         case auto
     }
 
@@ -39,6 +41,7 @@ struct Inspect: AsyncParsableCommand {
         switch type {
         case .image: return .image
         case .container: return .container
+        case .network: return .network
         case nil: return .auto
         }
     }
@@ -61,6 +64,11 @@ struct Inspect: AsyncParsableCommand {
             let results = try await inspectContainers(targets: targets, engine: engine)
             try InspectFormat.emitArray(results, format: format)
 
+        case .network:
+            let networkManager = try NetworkManager(config: config)
+            let results = try await inspectNetworks(targets: targets, manager: networkManager)
+            try InspectFormat.emitArray(results, format: format)
+
         case .auto:
             for target in targets {
                 if let container = try? await engine.inspect(target) {
@@ -70,10 +78,15 @@ struct Inspect: AsyncParsableCommand {
                         let image = try await imageManager.inspect(target, platform: platform)
                         try InspectFormat.emitOne(image, format: format)
                     } catch {
-                        if platform != nil {
-                            throw error
+                        // 3rd attempt: network (--platform accepted for image targets only; ignored for network — Docker parity)
+                        let networkManager = try NetworkManager(config: config)
+                        do {
+                            let info = try await networkManager.inspect(target)
+                            try InspectFormat.emitOne(mapToNetworkInspect(info), format: format)
+                        } catch {
+                            if platform != nil { throw error }
+                            throw MockerError.networkNotFound(target)
                         }
-                        throw MockerError.containerNotFound(target)
                     }
                 }
             }
