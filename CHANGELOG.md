@@ -12,6 +12,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **image inspect:** `mocker image inspect` and `mocker inspect --type=image` now return Docker-compatible `ImageInspect` JSON arrays with PascalCase keys instead of the previous lowercase `ImageInfo` object shape.
 * **MockerKit:** `ImageManager.inspect(_:platform:)` returns `ImageInspect` instead of `ImageInfo`.
 
+## [0.6.0](https://github.com/us/mocker/compare/v0.5.4...v0.6.0) (2026-06-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* 'mocker network inspect' now returns a Docker-compatible JSON array with the moby v29.6.1 network.Inspect shape (PascalCase keys, nested IPAM, Containers map) instead of the previous lowercase NetworkInfo object. Scripts consuming '.subnet' / '.gateway' / '.containers' (string array) must migrate to '.IPAM.Config[0].Subnet' / '.IPAM.Config[0].Gateway' / '.Containers' (map). Multi-arg invocation now returns one combined array (previously single-arg only).
+
+### Bug Fixes
+
+* make network inspect Docker-compatible ([#48](https://github.com/us/mocker/issues/48)) ([57f53c1](https://github.com/us/mocker/commit/57f53c18a20139b618b2e2c8be0fe9eecba7ef17))
+
 ## [0.5.4](https://github.com/us/mocker/compare/v0.5.3...v0.5.4) (2026-06-28)
 
 
