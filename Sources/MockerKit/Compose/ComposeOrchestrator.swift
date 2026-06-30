@@ -239,19 +239,7 @@ public actor ComposeOrchestrator {
         // Parse port mappings
         let ports = try service.ports.map { try PortMapping.parse($0) }
 
-        // Parse volumes — bind-mount absolute/relative host paths only.
-        // Named volumes (no leading '/') are skipped: Apple's virtiofs mounts don't
-        // support chown from within containers, which breaks images like postgres that
-        // chown their data directory on init. Containers use internal VM storage instead.
-        var volumes: [VolumeMount] = []
-        for volSpec in service.volumes {
-            let mount = try VolumeMount.parse(volSpec)
-            // Only bind-mount absolute host paths; skip named volumes
-            if mount.source.isEmpty || mount.source.hasPrefix("/") {
-                volumes.append(mount)
-            }
-            // Named volumes are intentionally skipped — container uses internal storage
-        }
+        let volumes = try Self.resolveVolumeMounts(service.volumes)
 
         let config = ContainerConfig(
             name: containerName,
@@ -270,5 +258,34 @@ public actor ComposeOrchestrator {
         )
 
         return try await engine.run(config)
+    }
+
+    /// Resolve volume spec strings from a compose service into `VolumeMount` values.
+    ///
+    /// Bind-mount host paths (absolute or relative) are included; anonymous volumes
+    /// (container paths only) are included; named volumes (bare names without path
+    /// separators) are skipped — Apple's virtiofs doesn't support chown from within
+    /// containers, which breaks images like postgres that chown their data directory
+    /// on init.
+    ///
+    /// Relative paths (`./foo`, `../bar`, `data/dir`) are resolved to absolute paths
+    /// against the current working directory. This matches Docker Compose behaviour
+    /// because `mocker compose` is run from the project directory.
+    static func resolveVolumeMounts(_ volSpecs: [String]) throws -> [VolumeMount] {
+        var volumes: [VolumeMount] = []
+        for volSpec in volSpecs {
+            var mount = try VolumeMount.parse(volSpec)
+            if mount.source.isEmpty {
+                volumes.append(mount)
+            } else if mount.source.hasPrefix("/") {
+                volumes.append(mount)
+            } else if mount.source.hasPrefix(".")
+                      || mount.source.hasPrefix("~")
+                      || mount.source.contains("/") {
+                mount.source = URL(fileURLWithPath: mount.source).path
+                volumes.append(mount)
+            }
+        }
+        return volumes
     }
 }

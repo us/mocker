@@ -149,4 +149,90 @@ struct ComposeOrchestratorTests {
         #expect(!ComposeService.imageMatches(img, tag: "proj-app:v2"))
         #expect(!ComposeService.imageMatches(img, tag: "other-app:latest"))
     }
+
+    // MARK: - Volume mount resolution (issue #49)
+
+    @Test("Absolute bind mount included as-is")
+    func resolveAbsoluteBindMount() throws {
+        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["/host/data:/container/data"])
+        #expect(mounts.count == 1)
+        #expect(mounts[0].source == "/host/data")
+        #expect(mounts[0].destination == "/container/data")
+    }
+
+    @Test("Relative bind mount resolved to absolute path")
+    func resolveRelativeBindMount() throws {
+        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["./foo:/bar"])
+        #expect(mounts.count == 1)
+        #expect(mounts[0].source.hasPrefix("/"))
+        #expect(mounts[0].source.hasSuffix("/foo"))
+        #expect(mounts[0].destination == "/bar")
+    }
+
+    @Test("Parent-relative bind mount resolved to absolute path")
+    func resolveParentRelativeBindMount() throws {
+        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["../data:/container/data"])
+        #expect(mounts.count == 1)
+        #expect(mounts[0].source.hasPrefix("/"))
+        #expect(mounts[0].source.hasSuffix("/data"))
+        #expect(mounts[0].destination == "/container/data")
+    }
+
+    @Test("Path with directory separator but no leading dot resolved")
+    func resolveDirSeparatorPath() throws {
+        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["mydir/data:/container/data"])
+        #expect(mounts.count == 1)
+        #expect(mounts[0].source.hasPrefix("/"))
+        #expect(mounts[0].source.hasSuffix("mydir/data"))
+        #expect(mounts[0].destination == "/container/data")
+    }
+
+    @Test("Named volume skipped")
+    func skipNamedVolume() throws {
+        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["mydata:/container/data"])
+        #expect(mounts.isEmpty)
+    }
+
+    @Test("Anonymous volume included")
+    func includeAnonymousVolume() throws {
+        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["/container/data"])
+        #expect(mounts.count == 1)
+        #expect(mounts[0].source == "")
+        #expect(mounts[0].destination == "/container/data")
+    }
+
+    @Test("Mix of bind mounts, named volumes, and anonymous volumes")
+    func resolveMixedVolumes() throws {
+        let mounts = try ComposeOrchestrator.resolveVolumeMounts([
+            "/abs/path:/app/data",
+            "./relative:/app/rel",
+            "namedvol:/app/named",
+            "/app/anon",
+            "sub/dir:/app/sub",
+        ])
+        #expect(mounts.count == 4)  // namedvol skipped
+        let sources = mounts.map(\.source)
+        #expect(sources.contains("/abs/path"))
+        #expect(sources.contains(""))  // anonymous
+        #expect(sources.contains(where: { $0.hasSuffix("/relative") }))
+        #expect(sources.contains(where: { $0.hasSuffix("sub/dir") }))
+    }
+
+    @Test("Read-only relative bind mount preserves ro flag")
+    func resolveRelativeReadOnly() throws {
+        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["./data:/container/data:ro"])
+        #expect(mounts.count == 1)
+        #expect(mounts[0].readOnly == true)
+        #expect(mounts[0].destination == "/container/data")
+        #expect(mounts[0].source.hasSuffix("/data"))
+    }
+
+    @Test("Home-relative path resolved")
+    func resolveHomeRelativePath() throws {
+        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["~/data:/container/data"])
+        #expect(mounts.count == 1)
+        #expect(mounts[0].source.hasPrefix("/"))
+        #expect(mounts[0].source.contains("data"))
+        #expect(mounts[0].destination == "/container/data")
+    }
 }
