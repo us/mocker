@@ -848,4 +848,55 @@ struct ComposeFileTests {
         let compose = try ComposeFile.load(from: composePath, projectDir: projectDir)
         #expect(compose.services["web"]?.image == "alpine:fallback")
     }
+
+    @Test("Env var in build.context substituted, then resolved against project-dir")
+    func buildContextEnvVarSubstitutedThenResolved() throws {
+        let root = try ComposeTestHelpers.makeProjectDir([
+            .file("proj/compose.yml", """
+                services:
+                  app:
+                    build:
+                      context: "${MYDIR}"
+                """),
+            .file("proj/.env", "MYDIR=./sub/app\n"),
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let composePath = root.appendingPathComponent("proj/compose.yml").path
+        let projectDir = root.appendingPathComponent("proj")
+        let compose = try ComposeFile.load(from: composePath, projectDir: projectDir)
+
+        // Substitution already ran during load() — the raw "${MYDIR}" literal is gone.
+        #expect(compose.services["app"]?.build?.context == "./sub/app")
+
+        let absContext = ImageManager.resolveContextPath(
+            context: compose.services["app"]!.build!.context, cwd: projectDir.path
+        )
+        #expect(absContext == projectDir.appendingPathComponent("sub/app").path)
+    }
+
+    @Test("Env var resolving to absolute path passes through unchanged after substitution")
+    func buildContextEnvVarAbsolutePassesThroughUnchanged() throws {
+        let root = try ComposeTestHelpers.makeProjectDir([
+            .file("proj/compose.yml", """
+                services:
+                  app:
+                    build:
+                      context: "${MYDIR}"
+                """),
+            .file("proj/.env", "MYDIR=/absolute/path/to/context\n"),
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let composePath = root.appendingPathComponent("proj/compose.yml").path
+        let projectDir = root.appendingPathComponent("proj")
+        let compose = try ComposeFile.load(from: composePath, projectDir: projectDir)
+
+        #expect(compose.services["app"]?.build?.context == "/absolute/path/to/context")
+
+        let absContext = ImageManager.resolveContextPath(
+            context: compose.services["app"]!.build!.context, cwd: projectDir.path
+        )
+        #expect(absContext == "/absolute/path/to/context")
+    }
 }

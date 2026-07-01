@@ -157,6 +157,22 @@ struct ImageManagerComposeDockerfilePathTests {
     }
 }
 
+@Suite("ImageManager Compose context path resolver")
+struct ImageManagerComposeContextPathTests {
+
+    @Test("relative context resolves against cwd")
+    func relativeContextResolvesAgainstCWD() {
+        let result = ImageManager.resolveContextPath(context: "../app", cwd: "/tmp/sub/dir")
+        #expect(result == "/tmp/sub/app")
+    }
+
+    @Test("absolute context passes through unchanged")
+    func absoluteContextPassesThroughUnchanged() {
+        let result = ImageManager.resolveContextPath(context: "/usr/local/src", cwd: "/tmp/sub/dir")
+        #expect(result == "/usr/local/src")
+    }
+}
+
 @Suite("ImageManager Dockerfile path resolver")
 struct ImageManagerDockerfileResolverTests {
 

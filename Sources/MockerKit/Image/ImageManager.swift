@@ -241,7 +241,8 @@ public actor ImageManager {
         return args
     }
 
-    static func resolveContextPath(context: String, cwd: String) -> String {
+    /// Resolve a build `context` to an absolute path anchored to `cwd`.
+    public static func resolveContextPath(context: String, cwd: String) -> String {
         guard !context.hasPrefix("/") else { return context }
         return URL(fileURLWithPath: cwd).appendingPathComponent(context).standardized.path
     }

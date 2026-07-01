@@ -18,15 +18,18 @@ public actor ComposeOrchestrator {
     private let networkManager: NetworkManager
     private let volumeManager: VolumeManager
     private let projectName: String
+    private let projectDir: URL
 
     public init(
         projectName: String,
+        projectDir: URL,
         engine: ContainerEngine,
         imageManager: ImageManager,
         networkManager: NetworkManager,
         volumeManager: VolumeManager
     ) {
         self.projectName = projectName
+        self.projectDir = projectDir
         self.engine = engine
         self.imageManager = imageManager
         self.networkManager = networkManager
@@ -222,14 +225,15 @@ public actor ComposeOrchestrator {
                 shouldBuild = !existingImages.contains { ComposeService.imageMatches($0, tag: tag) }
             }
             if shouldBuild {
+                let absContext = ImageManager.resolveContextPath(context: build.context, cwd: projectDir.path)
                 let dockerfilePath = ImageManager.composeDockerfilePath(
-                    context: build.context,
+                    context: absContext,
                     dockerfile: build.dockerfile ?? "Dockerfile",
-                    cwd: FileManager.default.currentDirectoryPath
+                    cwd: projectDir.path
                 )
                 _ = try await imageManager.build(
                     tag: tag,
-                    context: build.context,
+                    context: absContext,
                     dockerfile: dockerfilePath,
                     buildArgs: build.argList,
                     target: build.target
