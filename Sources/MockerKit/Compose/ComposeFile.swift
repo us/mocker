@@ -20,6 +20,23 @@ public struct ComposeFile: Sendable {
     /// Default compose file names searched in order, matching Docker Compose V2 behaviour.
     public static let defaultFileNames = ["compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"]
 
+    /// Resolve the Docker Compose project directory: explicit flag → dir of first non-'-' '-f' entry → cwd.
+    public static func resolveProjectDirectory(explicit: String?, files: [String], cwd: String) -> URL {
+        let cwdURL = URL(fileURLWithPath: cwd, isDirectory: true)
+        if let explicit, !explicit.isEmpty {
+            return URL(fileURLWithPath: explicit, relativeTo: cwdURL).standardizedFileURL
+        }
+        if let firstReal = files.first(where: { $0 != "-" }) {
+            return URL(fileURLWithPath: firstReal, relativeTo: cwdURL).standardizedFileURL.deletingLastPathComponent()
+        }
+        return cwdURL
+    }
+
+    /// Normalize a directory basename to a compose project name (lowercase + spaces to dashes).
+    public static func normalizeProjectName(_ s: String) -> String {
+        s.lowercased().replacingOccurrences(of: " ", with: "-")
+    }
+
     /// Return the path of the first default compose file found in `directory`.
     public static func findDefault(in directory: String = FileManager.default.currentDirectoryPath) -> String? {
         for name in defaultFileNames {
@@ -31,8 +48,8 @@ public struct ComposeFile: Sendable {
         return nil
     }
 
-    /// Parse a docker-compose.yml file from a path.
-    public static func load(from path: String) throws -> ComposeFile {
+    /// Parse a compose file at 'path'. '.env' auto-discovery uses 'projectDir/.env'.
+    public static func load(from path: String, projectDir: URL) throws -> ComposeFile {
         let url = URL(fileURLWithPath: path)
         guard FileManager.default.fileExists(atPath: path) else {
             throw MockerError.composeFileNotFound(path)
@@ -40,8 +57,7 @@ public struct ComposeFile: Sendable {
 
         var content = try String(contentsOf: url, encoding: .utf8)
 
-        // Load .env file from same directory for variable substitution
-        let envFile = url.deletingLastPathComponent().appendingPathComponent(".env").path
+        let envFile = projectDir.appendingPathComponent(".env").path
         let dotEnv = loadDotEnv(from: envFile)
 
         // Substitute ${VAR:-default} and $VAR patterns before YAML parsing

@@ -56,10 +56,18 @@ struct ComposeOptions: ParsableArguments {
     @Option(name: [.customShort("p"), .customLong("project-name")], help: "Project name")
     var projectName: String?
 
-    func loadCompose() throws -> (ComposeFile, String) {
+    @Option(name: .customLong("project-directory"), help: "Specify an alternate working directory")
+    var projectDirectory: String?
+
+    func loadCompose() throws -> (ComposeFile, projectName: String, projectDir: URL) {
+        let cwd = FileManager.default.currentDirectoryPath
+        let projectDir = ComposeFile.resolveProjectDirectory(
+            explicit: projectDirectory, files: files, cwd: cwd
+        )
+
         let paths: [String]
         if files.isEmpty {
-            guard let def = ComposeFile.findDefault() else {
+            guard let def = ComposeFile.findDefault(in: projectDir.path) else {
                 let searched = ComposeFile.defaultFileNames.joined(separator: ", ")
                 throw MockerError.composeFileNotFound("No compose file found. Searched for: \(searched)")
             }
@@ -68,17 +76,12 @@ struct ComposeOptions: ParsableArguments {
             paths = files
         }
 
-        let loaded = try paths.map { try ComposeFile.load(from: $0) }
+        let loaded = try paths.map { try ComposeFile.load(from: $0, projectDir: projectDir) }
         let composeFile = ComposeFile.merge(loaded)
 
-        // Derive project name from the first file's directory if not specified.
-        let project = projectName ?? URL(fileURLWithPath: paths[0])
-            .deletingLastPathComponent()
-            .lastPathComponent
-            .lowercased()
-            .replacingOccurrences(of: " ", with: "-")
+        let project = projectName ?? ComposeFile.normalizeProjectName(projectDir.lastPathComponent)
 
-        return (composeFile, project)
+        return (composeFile, project, projectDir)
     }
 }
 
@@ -210,7 +213,7 @@ struct ComposeUp: AsyncParsableCommand {
     var services: [String] = []
 
     func run() async throws {
-        var (composeFile, project) = try options.loadCompose()
+        var (composeFile, project, _) = try options.loadCompose()
         let config = MockerConfig()
         try config.ensureDirectories()
 
@@ -262,7 +265,7 @@ struct ComposeDown: AsyncParsableCommand {
     var rmi: String?
 
     func run() async throws {
-        let (composeFile, project) = try options.loadCompose()
+        let (composeFile, project, _) = try options.loadCompose()
         let config = MockerConfig()
 
         let engine = try ContainerEngine(config: config)
@@ -323,7 +326,7 @@ struct ComposePS: AsyncParsableCommand {
     var services: [String] = []
 
     func run() async throws {
-        let (_, project) = try options.loadCompose()
+        let (_, project, _) = try options.loadCompose()
         let config = MockerConfig()
 
         let engine = try ContainerEngine(config: config)
@@ -417,7 +420,7 @@ struct ComposeLogs: AsyncParsableCommand {
     var until: String?
 
     func run() async throws {
-        let (_, project) = try options.loadCompose()
+        let (_, project, _) = try options.loadCompose()
         let config = MockerConfig()
         let engine = try ContainerEngine(config: config)
         let imageManager = try ImageManager(config: config)
@@ -470,7 +473,7 @@ struct ComposeKill: AsyncParsableCommand {
     var signal: String?
 
     func run() async throws {
-        let (_, project) = try options.loadCompose()
+        let (_, project, _) = try options.loadCompose()
         let config = MockerConfig()
         let engine = try ContainerEngine(config: config)
         let imageManager = try ImageManager(config: config)
@@ -515,7 +518,7 @@ struct ComposeRestart: AsyncParsableCommand {
     var timeout: Int?
 
     func run() async throws {
-        let (composeFile, project) = try options.loadCompose()
+        let (composeFile, project, _) = try options.loadCompose()
         let config = MockerConfig()
 
         let engine = try ContainerEngine(config: config)
@@ -592,7 +595,7 @@ struct ComposeBuildCommand: AsyncParsableCommand {
     var services: [String] = []
 
     func run() async throws {
-        let (composeFile, _) = try options.loadCompose()
+        let (composeFile, _, _) = try options.loadCompose()
         let config = MockerConfig()
         let manager = try ImageManager(config: config)
 
@@ -652,7 +655,7 @@ struct ComposePull: AsyncParsableCommand {
     var services: [String] = []
 
     func run() async throws {
-        let (composeFile, _) = try options.loadCompose()
+        let (composeFile, _, _) = try options.loadCompose()
         let config = MockerConfig()
         let manager = try ImageManager(config: config)
 
@@ -703,7 +706,7 @@ struct ComposePush: AsyncParsableCommand {
     var services: [String] = []
 
     func run() async throws {
-        let (composeFile, _) = try options.loadCompose()
+        let (composeFile, _, _) = try options.loadCompose()
         let config = MockerConfig()
         let manager = try ImageManager(config: config)
 
@@ -782,7 +785,7 @@ struct ComposeExec: AsyncParsableCommand {
     }
 
     func run() async throws {
-        let (_, project) = try options.loadCompose()
+        let (_, project, _) = try options.loadCompose()
         let config = MockerConfig()
         let engine = try ContainerEngine(config: config)
 
@@ -896,7 +899,7 @@ struct ComposeRun: AsyncParsableCommand {
     }
 
     func run() async throws {
-        let (composeFile, _) = try options.loadCompose()
+        let (composeFile, _, _) = try options.loadCompose()
         let config = MockerConfig()
         let engine = try ContainerEngine(config: config)
 
@@ -957,7 +960,7 @@ struct ComposeStop: AsyncParsableCommand {
     var services: [String] = []
 
     func run() async throws {
-        let (_, project) = try options.loadCompose()
+        let (_, project, _) = try options.loadCompose()
         let config = MockerConfig()
         let engine = try ContainerEngine(config: config)
         let imageManager = try ImageManager(config: config)
@@ -1007,7 +1010,7 @@ struct ComposeStart: AsyncParsableCommand {
     var services: [String] = []
 
     func run() async throws {
-        let (_, project) = try options.loadCompose()
+        let (_, project, _) = try options.loadCompose()
         let config = MockerConfig()
         let engine = try ContainerEngine(config: config)
         let imageManager = try ImageManager(config: config)
@@ -1060,7 +1063,7 @@ struct ComposeRm: AsyncParsableCommand {
     var services: [String] = []
 
     func run() async throws {
-        let (_, project) = try options.loadCompose()
+        let (_, project, _) = try options.loadCompose()
         let config = MockerConfig()
         let engine = try ContainerEngine(config: config)
         let imageManager = try ImageManager(config: config)
@@ -1159,7 +1162,7 @@ struct ComposeConfig: AsyncParsableCommand {
     var variables = false
 
     func run() async throws {
-        let (composeFile, _) = try options.loadCompose()
+        let (composeFile, _, _) = try options.loadCompose()
 
         if quiet { return }
 
@@ -1235,7 +1238,7 @@ struct ComposeCreate: AsyncParsableCommand {
 
     func run() async throws {
         // create is essentially up without starting — for now delegate to up
-        var (composeFile, project) = try options.loadCompose()
+        var (composeFile, project, _) = try options.loadCompose()
         let config = MockerConfig()
         try config.ensureDirectories()
 
@@ -1281,7 +1284,7 @@ struct ComposeImages: AsyncParsableCommand {
     var quiet = false
 
     func run() async throws {
-        let (_, project) = try options.loadCompose()
+        let (_, project, _) = try options.loadCompose()
         let config = MockerConfig()
         let engine = try ContainerEngine(config: config)
         let imageManager = try ImageManager(config: config)
@@ -1325,7 +1328,7 @@ struct ComposeTop: AsyncParsableCommand {
     var services: [String] = []
 
     func run() async throws {
-        let (_, project) = try options.loadCompose()
+        let (_, project, _) = try options.loadCompose()
         let config = MockerConfig()
         let engine = try ContainerEngine(config: config)
         let imageManager = try ImageManager(config: config)
@@ -1383,7 +1386,7 @@ struct ComposePort: AsyncParsableCommand {
     var `protocol`: String?
 
     func run() async throws {
-        let (_, project) = try options.loadCompose()
+        let (_, project, _) = try options.loadCompose()
         let config = MockerConfig()
         let engine = try ContainerEngine(config: config)
 
@@ -1412,7 +1415,7 @@ struct ComposePause: AsyncParsableCommand {
     var services: [String] = []
 
     func run() async throws {
-        let (_, project) = try options.loadCompose()
+        let (_, project, _) = try options.loadCompose()
         let config = MockerConfig()
         let engine = try ContainerEngine(config: config)
         let imageManager = try ImageManager(config: config)
@@ -1454,7 +1457,7 @@ struct ComposeUnpause: AsyncParsableCommand {
     var services: [String] = []
 
     func run() async throws {
-        let (_, project) = try options.loadCompose()
+        let (_, project, _) = try options.loadCompose()
         let config = MockerConfig()
         let engine = try ContainerEngine(config: config)
         let imageManager = try ImageManager(config: config)
@@ -1563,7 +1566,7 @@ struct ComposeCp: AsyncParsableCommand {
     var followLink = false
 
     func run() async throws {
-        let (_, project) = try options.loadCompose()
+        let (_, project, _) = try options.loadCompose()
         let config = MockerConfig()
         let engine = try ContainerEngine(config: config)
 
@@ -1644,7 +1647,7 @@ struct ComposeAttach: AsyncParsableCommand {
     var service: String
 
     func run() async throws {
-        let (_, project) = try options.loadCompose()
+        let (_, project, _) = try options.loadCompose()
         let config = MockerConfig()
         let engine = try ContainerEngine(config: config)
         let idx = index ?? 1
@@ -1818,7 +1821,7 @@ struct ComposeVolumes: AsyncParsableCommand {
     var quiet = false
 
     func run() async throws {
-        let (composeFile, _) = try options.loadCompose()
+        let (composeFile, _, _) = try options.loadCompose()
         for (name, _) in composeFile.volumes {
             print(name)
         }

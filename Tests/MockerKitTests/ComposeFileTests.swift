@@ -632,4 +632,220 @@ struct ComposeFileTests {
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         return dir
     }
+
+    @Test("Explicit --project-directory wins over -f dir and cwd")
+    func resolveProjectDirectoryExplicitWins() {
+        let resolved = ComposeFile.resolveProjectDirectory(
+            explicit: "/tmp/sub",
+            files: ["/tmp/sub/dir/compose.yml"],
+            cwd: "/tmp/other"
+        )
+        #expect(resolved.path == "/tmp/sub")
+    }
+
+    @Test("First -f directory wins when no explicit flag")
+    func resolveProjectDirectoryFirstFileWins() {
+        let resolved = ComposeFile.resolveProjectDirectory(
+            explicit: nil,
+            files: ["/tmp/sub/dir/compose.yml"],
+            cwd: "/tmp/other"
+        )
+        #expect(resolved.path == "/tmp/sub/dir")
+    }
+
+    @Test("Empty explicit --project-directory is treated as absent, falls through to -f dir")
+    func resolveProjectDirectoryEmptyExplicitFallsThrough() {
+        let resolved = ComposeFile.resolveProjectDirectory(
+            explicit: "",
+            files: ["/tmp/dir/x.yml"],
+            cwd: "/tmp/other"
+        )
+        #expect(resolved.path == "/tmp/dir")
+    }
+
+    @Test("CWD wins when no explicit flag and no -f files")
+    func resolveProjectDirectoryCWDFallback() {
+        let resolved = ComposeFile.resolveProjectDirectory(
+            explicit: nil,
+            files: [],
+            cwd: "/tmp/myproject"
+        )
+        #expect(resolved.path == "/tmp/myproject")
+    }
+
+    @Test("Nonexistent explicit project-directory is accepted lazily")
+    func resolveProjectDirectoryLazyValidation() {
+        let resolved = ComposeFile.resolveProjectDirectory(
+            explicit: "/no/exist/path",
+            files: ["/tmp/proj/compose.yml"],
+            cwd: "/tmp/other"
+        )
+        #expect(resolved.path == "/no/exist/path")
+        #expect(resolved.lastPathComponent == "path")
+    }
+
+    @Test("Single -f - (stdin only) falls back to cwd")
+    func resolveProjectDirectoryStdinOnlyFallsBackToCWD() {
+        let resolved = ComposeFile.resolveProjectDirectory(
+            explicit: nil,
+            files: ["-"],
+            cwd: "/tmp/x"
+        )
+        #expect(resolved.path == "/tmp/x")
+    }
+
+    @Test("Mixed -f - -f file.yml resolves to the real file's dir (stdin first)")
+    func resolveProjectDirectoryMixedStdinFirst() {
+        let resolved = ComposeFile.resolveProjectDirectory(
+            explicit: nil,
+            files: ["-", "/tmp/dir/file.yml"],
+            cwd: "/tmp/other"
+        )
+        #expect(resolved.path == "/tmp/dir")
+    }
+
+    @Test("Mixed -f file.yml -f - resolves to the real file's dir (stdin last)")
+    func resolveProjectDirectoryMixedStdinLast() {
+        let resolved = ComposeFile.resolveProjectDirectory(
+            explicit: nil,
+            files: ["/tmp/dir/file.yml", "-"],
+            cwd: "/tmp/other"
+        )
+        #expect(resolved.path == "/tmp/dir")
+    }
+
+    @Test("All -f entries are - falls back to cwd")
+    func resolveProjectDirectoryAllStdinFallsBackToCWD() {
+        let resolved = ComposeFile.resolveProjectDirectory(
+            explicit: nil,
+            files: ["-", "-"],
+            cwd: "/tmp/x"
+        )
+        #expect(resolved.path == "/tmp/x")
+    }
+
+    @Test("Relative explicit --project-directory resolves against injected cwd, not process cwd")
+    func resolveProjectDirectoryRelativeExplicitHonorsCwd() {
+        let resolved = ComposeFile.resolveProjectDirectory(
+            explicit: "sub",
+            files: [],
+            cwd: "/tmp/myproject"
+        )
+        #expect(resolved.path == "/tmp/myproject/sub")
+    }
+
+    @Test("Relative first -f entry resolves against injected cwd, not process cwd")
+    func resolveProjectDirectoryRelativeFirstFileHonorsCwd() {
+        let resolved = ComposeFile.resolveProjectDirectory(
+            explicit: nil,
+            files: ["dir/compose.yml"],
+            cwd: "/tmp/myproject"
+        )
+        #expect(resolved.path == "/tmp/myproject/dir")
+    }
+
+    @Test("Injected cwd different from the real process cwd is honored")
+    func resolveProjectDirectoryHonorsInjectedCwdOverProcessCwd() {
+        let resolved = ComposeFile.resolveProjectDirectory(
+            explicit: "relative",
+            files: [],
+            cwd: "/tmp/not-the-real-cwd"
+        )
+        #expect(resolved.path == "/tmp/not-the-real-cwd/relative")
+        #expect(resolved.path != FileManager.default.currentDirectoryPath + "/relative")
+    }
+
+    @Test("Explicit flag + deeper compose file: name from flag's last component, not the file's parent")
+    func projectNameFromExplicitFlagNotFileParent() {
+        let projectDir = ComposeFile.resolveProjectDirectory(
+            explicit: "/tmp/myproj",
+            files: ["/tmp/myproj/deep/sub/compose.yml"],
+            cwd: "/tmp/other"
+        )
+        #expect(projectDir.lastPathComponent != "sub")
+        #expect(ComposeFile.normalizeProjectName(projectDir.lastPathComponent) == "myproj")
+    }
+
+    @Test("No flag, deeper compose file: name from first -f dir's last component")
+    func projectNameFromFirstFileDirWhenNoFlag() {
+        let projectDir = ComposeFile.resolveProjectDirectory(
+            explicit: nil,
+            files: ["/tmp/myproj/deep/sub/compose.yml"],
+            cwd: "/tmp/other"
+        )
+        #expect(ComposeFile.normalizeProjectName(projectDir.lastPathComponent) == "sub")
+    }
+
+    @Test("normalizeProjectName lowercases uppercase directory names")
+    func normalizeProjectNameLowercasesUppercase() {
+        #expect(ComposeFile.normalizeProjectName("MyProject") == "myproject")
+    }
+
+    @Test("normalizeProjectName replaces spaces with dashes")
+    func normalizeProjectNameReplacesSpaces() {
+        #expect(ComposeFile.normalizeProjectName("my project") == "my-project")
+    }
+
+    private static let substitutionYAML = """
+    services:
+      web:
+        image: alpine:${TAG:-fallback}
+    """
+
+    @Test(".env loaded from projectDir, not the compose file's own dir")
+    func envLoadedFromProjectDir() throws {
+        let root = try ComposeTestHelpers.makeProjectDir([
+            .file("sub/dir/compose.yml", Self.substitutionYAML),
+            .file("sub/dir/.env", "TAG=from_dir\n"),
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let composePath = root.appendingPathComponent("sub/dir/compose.yml").path
+        let projectDir = root.appendingPathComponent("sub/dir")
+        let compose = try ComposeFile.load(from: composePath, projectDir: projectDir)
+        #expect(compose.services["web"]?.image == "alpine:from_dir")
+    }
+
+    @Test("Explicit project-directory overrides .env source over first -f dir")
+    func envSourceFollowsExplicitProjectDirectory() throws {
+        let root = try ComposeTestHelpers.makeProjectDir([
+            .file("sub/dir/compose.yml", Self.substitutionYAML),
+            .file("sub/.env", "TAG=from_sub\n"),
+            .file("sub/dir/.env", "TAG=from_dir\n"),
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let composePath = root.appendingPathComponent("sub/dir/compose.yml").path
+        let projectDir = root.appendingPathComponent("sub")
+        let compose = try ComposeFile.load(from: composePath, projectDir: projectDir)
+        #expect(compose.services["web"]?.image == "alpine:from_sub")
+    }
+
+    @Test("CWD's .env is not loaded when project-dir is established via -f")
+    func envNotLoadedFromCWDWhenProjectDirFromFile() throws {
+        let root = try ComposeTestHelpers.makeProjectDir([
+            .file("sub/dir/compose.yml", Self.substitutionYAML),
+            .file("sub/dir/.env", "TAG=from_dir\n"),
+            .file("cwd/.env", "TAG=from_cwd\n"),
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let composePath = root.appendingPathComponent("sub/dir/compose.yml").path
+        let projectDir = root.appendingPathComponent("sub/dir")
+        let compose = try ComposeFile.load(from: composePath, projectDir: projectDir)
+        #expect(compose.services["web"]?.image == "alpine:from_dir")
+    }
+
+    @Test("Missing .env is silently skipped, no error")
+    func missingEnvSilentlySkipped() throws {
+        let root = try ComposeTestHelpers.makeProjectDir([
+            .file("proj/compose.yml", Self.substitutionYAML),
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let composePath = root.appendingPathComponent("proj/compose.yml").path
+        let projectDir = root.appendingPathComponent("proj")
+        let compose = try ComposeFile.load(from: composePath, projectDir: projectDir)
+        #expect(compose.services["web"]?.image == "alpine:fallback")
+    }
 }

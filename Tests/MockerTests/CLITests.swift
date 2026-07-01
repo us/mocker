@@ -35,6 +35,29 @@ struct CLITests {
         #expect(command.detach == true)
     }
 
+    @Test("Compose subcommand accepts --project-directory flag")
+    func composeProjectDirectoryFlag() throws {
+        let command = try ComposePull.parse(["--project-directory", "/tmp/myproj", "-f", "a.yaml"])
+        #expect(command.options.projectDirectory == "/tmp/myproj")
+    }
+
+    @Test("loadCompose discovers the default file inside --project-directory when -f is omitted")
+    func loadComposeUsesProjectDirectoryForDefaultDiscovery() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let projectDir = root.appendingPathComponent("proj")
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let composePath = projectDir.appendingPathComponent("compose.yml")
+        try "services:\n  web:\n    image: nginx:latest\n".write(to: composePath, atomically: true, encoding: .utf8)
+
+        let command = try ComposePull.parse(["--project-directory", projectDir.path])
+        let (composeFile, _, resolvedProjectDir) = try command.options.loadCompose()
+
+        #expect(resolvedProjectDir.path == projectDir.path)
+        #expect(composeFile.services["web"] != nil)
+    }
+
     @Test("Run command accepts nested virtualization flags")
     func runVirtualizationFlags() throws {
         let command = try Run.parse(["--virtualization", "--kernel", "/tmp/vmlinux", "ubuntu:latest"])
