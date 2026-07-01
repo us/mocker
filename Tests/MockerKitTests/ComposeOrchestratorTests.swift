@@ -160,31 +160,20 @@ struct ComposeOrchestratorTests {
         #expect(mounts[0].destination == "/container/data")
     }
 
-    @Test("Relative bind mount resolved to absolute path")
-    func resolveRelativeBindMount() throws {
-        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["./foo:/bar"])
+    @Test(
+        "Relative-style sources resolved to absolute path",
+        arguments: [
+            ("./foo:/bar", "/foo", "/bar"),
+            ("../data:/container/data", "/data", "/container/data"),
+            ("mydir/data:/container/data", "mydir/data", "/container/data"),
+        ]
+    )
+    func resolveRelativeStyleMounts(spec: String, suffix: String, destination: String) throws {
+        let mounts = try ComposeOrchestrator.resolveVolumeMounts([spec])
         #expect(mounts.count == 1)
         #expect(mounts[0].source.hasPrefix("/"))
-        #expect(mounts[0].source.hasSuffix("/foo"))
-        #expect(mounts[0].destination == "/bar")
-    }
-
-    @Test("Parent-relative bind mount resolved to absolute path")
-    func resolveParentRelativeBindMount() throws {
-        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["../data:/container/data"])
-        #expect(mounts.count == 1)
-        #expect(mounts[0].source.hasPrefix("/"))
-        #expect(mounts[0].source.hasSuffix("/data"))
-        #expect(mounts[0].destination == "/container/data")
-    }
-
-    @Test("Path with directory separator but no leading dot resolved")
-    func resolveDirSeparatorPath() throws {
-        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["mydir/data:/container/data"])
-        #expect(mounts.count == 1)
-        #expect(mounts[0].source.hasPrefix("/"))
-        #expect(mounts[0].source.hasSuffix("mydir/data"))
-        #expect(mounts[0].destination == "/container/data")
+        #expect(mounts[0].source.hasSuffix(suffix))
+        #expect(mounts[0].destination == destination)
     }
 
     @Test("Named volume skipped")
