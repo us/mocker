@@ -206,6 +206,35 @@ struct ContainerEngineTests {
         if let idx { #expect(args[idx + 1] == "5353:53/udp") }
     }
 
+    @Test("Run arguments carry the host-IP prefix end-to-end (parse -> config -> -p)")
+    func testRunArgumentsPublishHostIP() throws {
+        // Full chain: the spec a user types, through PortMapping.parse, into the exact
+        // string handed to `container run -p`. Proves #55: the prefix is no longer dropped.
+        let config = ContainerConfig(
+            image: "nginx:alpine",
+            ports: [try PortMapping.parse("127.0.0.1:8080:80")]
+        )
+
+        let args = ContainerEngine.buildRunArguments(name: "web", config: config)
+
+        let idx = args.firstIndex(of: "-p")
+        #expect(idx != nil)
+        if let idx { #expect(args[idx + 1] == "127.0.0.1:8080:80/tcp") }
+    }
+
+    @Test("Run arguments omit host IP when unspecified (wildcard bind)")
+    func testRunArgumentsNoHostIP() {
+        let config = ContainerConfig(
+            image: "nginx:alpine",
+            ports: [PortMapping(hostPort: 8080, containerPort: 80)]
+        )
+        let args = ContainerEngine.buildRunArguments(name: "web", config: config)
+        let idx = args.firstIndex(of: "-p")
+        #expect(idx != nil)
+        // No leading IP — a bare host:container preserves the pre-#55 wildcard behavior.
+        if let idx { #expect(args[idx + 1] == "8080:80/tcp") }
+    }
+
     @Test("Run arguments omit -p when no ports requested")
     func testRunArgumentsNoPorts() {
         let config = ContainerConfig(image: "alpine")
