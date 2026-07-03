@@ -12,6 +12,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **image inspect:** `mocker image inspect` and `mocker inspect --type=image` now return Docker-compatible `ImageInspect` JSON arrays with PascalCase keys instead of the previous lowercase `ImageInfo` object shape.
 * **MockerKit:** `ImageManager.inspect(_:platform:)` returns `ImageInspect` instead of `ImageInfo`.
 
+## [0.7.0](https://github.com/us/mocker/compare/v0.6.1...v0.7.0) (2026-07-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* **compose:** 'ComposeFile.load(...)' now requires a 'projectDir: URL' parameter. '.env' discovery and the default compose project name anchor to the resolved project directory (explicit '--project-directory', else the first '-f' file's directory, else the current working directory) instead of each compose file's own directory.
+
+### Features
+
+* **registry:** support keychain-backed registry authentication ([50e9e74](https://github.com/us/mocker/commit/50e9e74da93cde55d4ad1b9abdd4efbedf69c84a)), closes [#53](https://github.com/us/mocker/issues/53)
+
+
+### Bug Fixes
+
+* **compose:** honor Docker's project-directory anchoring model ([#54](https://github.com/us/mocker/issues/54)) ([eb422bb](https://github.com/us/mocker/commit/eb422bb7b5fe5b28508db6ad8c7a6f2845125c30))
+* **publish:** honor [host-ip:] prefix in -p and compose ports ([c26af4d](https://github.com/us/mocker/commit/c26af4d0b9235b290e2bdc0a6bd9fa13cd6168b9)), closes [#55](https://github.com/us/mocker/issues/55)
+
 ## [0.6.1](https://github.com/us/mocker/compare/v0.6.0...v0.6.1) (2026-07-01)
 
 
