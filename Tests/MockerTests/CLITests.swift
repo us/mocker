@@ -28,6 +28,18 @@ struct CLITests {
         #expect(command.options.files == ["a.yaml", "b.yaml"])
     }
 
+    @Test("Compose subcommand accepts --file long flag (Docker parity)")
+    func composeFileLongFlag() throws {
+        let command = try ComposePull.parse(["--file", "a.yaml"])
+        #expect(command.options.files == ["a.yaml"])
+    }
+
+    @Test("Compose subcommand accepts --file mixed with -f")
+    func composeFileLongAndShort() throws {
+        let command = try ComposePull.parse(["-f", "a.yaml", "--file", "b.yaml"])
+        #expect(command.options.files == ["a.yaml", "b.yaml"])
+    }
+
     @Test("Compose up parses -f together with a subcommand flag")
     func composeUpFileAndFlag() throws {
         let command = try ComposeUp.parse(["-f", "docker-compose.yml", "--detach"])

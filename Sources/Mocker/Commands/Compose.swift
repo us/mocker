@@ -49,7 +49,7 @@ struct ComposeCommand: AsyncParsableCommand {
 // MARK: - Shared Options
 
 struct ComposeOptions: ParsableArguments {
-    @Option(name: [.customShort("f"), .long], parsing: .singleValue,
+    @Option(name: [.customShort("f"), .long, .customLong("file")], parsing: .singleValue,
             help: "Compose file path (repeatable; later files override earlier)")
     var files: [String] = []
 
