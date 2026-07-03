@@ -55,15 +55,27 @@ public struct ComposeFile: Sendable {
             throw MockerError.composeFileNotFound(path)
         }
 
-        var content = try String(contentsOf: url, encoding: .utf8)
+        let content = try String(contentsOf: url, encoding: .utf8)
+        return try parseAndSubstitute(content: content, projectDir: projectDir)
+    }
 
+    /// Parse a compose file from an in-memory string (stdin `-f -`).
+    /// '.env' auto-discovery uses 'projectDir/.env'. Throws if content is empty.
+    public static func load(content: String, projectDir: URL) throws -> ComposeFile {
+        if content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw MockerError.composeParseError("compose file content is empty")
+        }
+        return try parseAndSubstitute(content: content, projectDir: projectDir)
+    }
+
+    private static func parseAndSubstitute(content: String, projectDir: URL) throws -> ComposeFile {
         let envFile = projectDir.appendingPathComponent(".env").path
         let dotEnv = loadDotEnv(from: envFile)
 
         // Substitute ${VAR:-default} and $VAR patterns before YAML parsing
-        content = substituteVariables(in: content, dotEnv: dotEnv)
+        let substituted = substituteVariables(in: content, dotEnv: dotEnv)
 
-        return try parse(content)
+        return try parse(substituted)
     }
 
     /// Load key=value pairs from a .env file.

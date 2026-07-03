@@ -76,7 +76,14 @@ struct ComposeOptions: ParsableArguments {
             paths = files
         }
 
-        let loaded = try paths.map { try ComposeFile.load(from: $0, projectDir: projectDir) }
+        let loaded = try paths.map { entry -> ComposeFile in
+            if entry == "-" {
+                let data = try FileHandle.standardInput.readToEnd() ?? Data()
+                let content = String(decoding: data, as: UTF8.self)
+                return try ComposeFile.load(content: content, projectDir: projectDir)
+            }
+            return try ComposeFile.load(from: entry, projectDir: projectDir)
+        }
         let composeFile = ComposeFile.merge(loaded)
 
         let project = projectName ?? ComposeFile.normalizeProjectName(projectDir.lastPathComponent)

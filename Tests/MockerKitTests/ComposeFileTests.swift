@@ -899,4 +899,54 @@ struct ComposeFileTests {
         )
         #expect(absContext == "/absolute/path/to/context")
     }
+
+    @Test("load(content:): valid YAML string parses like a file")
+    func loadContentStdinHappyPath() throws {
+        let root = try ComposeTestHelpers.makeProjectDir([])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let projectDir = root.appendingPathComponent("sliceb_sa", isDirectory: true)
+        let yaml = """
+        services:
+          web:
+            image: alpine
+        """
+        let compose = try ComposeFile.load(content: yaml, projectDir: projectDir)
+        #expect(compose.services["web"]?.image == "alpine")
+    }
+
+    @Test("load(content:): empty string throws composeParseError with empty detail")
+    func loadContentEmptyStdinThrows() throws {
+        let root = try ComposeTestHelpers.makeProjectDir([])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let projectDir = root.appendingPathComponent("sliceb_sb", isDirectory: true)
+        #expect(throws: MockerError.self) {
+            _ = try ComposeFile.load(content: "", projectDir: projectDir)
+        }
+        do {
+            _ = try ComposeFile.load(content: "", projectDir: projectDir)
+            Issue.record("expected throw")
+        } catch let error as MockerError {
+            #expect(error.errorDescription?.contains("compose file content is empty") == true)
+        } catch {
+            Issue.record("unexpected error type: \(error)")
+        }
+    }
+
+    @Test("load(content:): whitespace-only content throws the same empty-stdin error")
+    func loadContentWhitespaceOnlyStdinThrows() throws {
+        let root = try ComposeTestHelpers.makeProjectDir([])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let projectDir = root.appendingPathComponent("sliceb_sc", isDirectory: true)
+        do {
+            _ = try ComposeFile.load(content: "  \n\n  ", projectDir: projectDir)
+            Issue.record("expected throw")
+        } catch let error as MockerError {
+            #expect(error.errorDescription?.contains("compose file content is empty") == true)
+        } catch {
+            Issue.record("unexpected error type: \(error)")
+        }
+    }
 }
