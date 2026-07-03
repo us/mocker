@@ -27,7 +27,9 @@ public actor ImageManager {
             return (Self.toImageInfo(existing), true)
         }
 
-        let image = try await imageStore.pull(reference: normalized, platform: parsedPlatform)
+        let image = try await imageStore.pull(
+            reference: normalized, platform: parsedPlatform, auth: RegistryAuth.resolve(for: normalized)
+        )
         return (Self.toImageInfo(image), false)
     }
 
@@ -326,7 +328,9 @@ public actor ImageManager {
             throw MockerError.imageNotFound(reference)
         }
         let parsedPlatform = try platform.map { try ContainerizationOCI.Platform(from: $0) }
-        try await imageStore.push(reference: normalized, platform: parsedPlatform)
+        try await imageStore.push(
+            reference: normalized, platform: parsedPlatform, auth: RegistryAuth.resolve(for: normalized)
+        )
     }
 
     // MARK: - Save / Load

@@ -8,12 +8,10 @@ struct Logout: AsyncParsableCommand {
     )
 
     @Argument(help: "Registry server (default: Docker Hub)")
-    var server: String = "https://index.docker.io/v1/"
+    var server: String = "docker.io"
 
     func run() async throws {
-        throw MockerError.operationFailed(
-            "registry authentication is not yet supported by Mocker. " +
-            "Pull/push operations use anonymous access only."
-        )
+        try RegistryAuth.logout(server: server)
+        print("Removed login credentials for \(server)")
     }
 }

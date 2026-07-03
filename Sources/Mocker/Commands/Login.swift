@@ -17,14 +17,32 @@ struct Login: AsyncParsableCommand {
     var passwordStdin = false
 
     @Argument(help: "Registry server (default: Docker Hub)")
-    var server: String = "https://index.docker.io/v1/"
+    var server: String = "docker.io"
 
     func run() async throws {
-        // Registry authentication is not yet wired into pull/push operations.
-        // Rather than silently storing credentials that are never used, fail explicitly.
-        throw MockerError.operationFailed(
-            "registry authentication is not yet supported by Mocker. " +
-            "Pull/push operations use anonymous access only."
-        )
+        var username = self.username
+        var password = self.password
+
+        if passwordStdin {
+            guard username != nil else {
+                throw MockerError.operationFailed("Must provide --username with --password-stdin")
+            }
+            guard let data = try FileHandle.standardInput.readToEnd() else {
+                throw MockerError.operationFailed("Failed to read password from stdin")
+            }
+            password = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        let resolvedUser = try username ?? RegistryAuth.promptUsername(server: server)
+        let resolvedPass: String
+        if let password {
+            resolvedPass = password
+        } else {
+            resolvedPass = try RegistryAuth.promptPassword()
+            print()
+        }
+
+        try await RegistryAuth.login(server: server, username: resolvedUser, password: resolvedPass)
+        print("Login succeeded")
     }
 }
