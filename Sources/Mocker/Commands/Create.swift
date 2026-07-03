@@ -23,7 +23,7 @@ struct Create: AsyncParsableCommand {
     @Option(name: .long, help: "Read in a file of environment variables")
     var envFile: String?
 
-    @Option(name: .shortAndLong, parsing: .singleValue, help: "Publish container port (hostPort:containerPort)")
+    @Option(name: .shortAndLong, parsing: .singleValue, help: "Publish container port ([host-ip:]hostPort:containerPort[/protocol])")
     var publish: [String] = []
 
     @Option(name: .shortAndLong, parsing: .singleValue, help: "Bind mount a volume (source:destination[:ro])")

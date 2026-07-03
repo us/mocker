@@ -12,7 +12,7 @@ public func mapToContainerListItem(_ c: ContainerInfo) -> [String: Any] {
     let state = c.state == .stopped ? "exited" : c.state.rawValue
     let ports: [[String: Any]] = c.ports.map { p in
         [
-            "IP": "0.0.0.0",
+            "IP": p.hostIp ?? "0.0.0.0",
             "PrivatePort": Int(p.containerPort),
             "PublicPort": Int(p.hostPort),
             "Type": p.portProtocol.rawValue,

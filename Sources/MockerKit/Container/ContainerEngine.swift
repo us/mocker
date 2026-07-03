@@ -92,7 +92,8 @@ public actor ContainerEngine {
         // host-reachable forwarding through vmnet — this is what actually makes
         // published ports reachable, for both `mocker run -p` and `compose up`.
         for port in containerConfig.ports {
-            args += ["-p", "\(port.hostPort):\(port.containerPort)/\(port.portProtocol.rawValue)"]
+            let hostPrefix = port.hostIp.map { "\($0):" } ?? ""
+            args += ["-p", "\(hostPrefix)\(port.hostPort):\(port.containerPort)/\(port.portProtocol.rawValue)"]
         }
 
         if let workingDir = containerConfig.workingDir, !workingDir.isEmpty {

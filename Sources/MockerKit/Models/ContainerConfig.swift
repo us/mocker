@@ -118,25 +118,31 @@ public struct PortMapping: Codable, Sendable, CustomStringConvertible {
     public var hostPort: UInt16
     public var containerPort: UInt16
     public var portProtocol: PortProtocol
+    /// Optional host IP to bind to (e.g. "127.0.0.1"). `nil` means the wildcard `0.0.0.0`.
+    public var hostIp: String?
 
-    public init(hostPort: UInt16, containerPort: UInt16, portProtocol: PortProtocol = .tcp) {
+    public init(
+        hostPort: UInt16, containerPort: UInt16, portProtocol: PortProtocol = .tcp, hostIp: String? = nil
+    ) {
         self.hostPort = hostPort
         self.containerPort = containerPort
         self.portProtocol = portProtocol
+        self.hostIp = hostIp
     }
 
     public var description: String {
-        "\(hostPort):\(containerPort)/\(portProtocol.rawValue)"
+        let hostPart = hostIp.map { "\($0):" } ?? ""
+        return "\(hostPart)\(hostPort):\(containerPort)/\(portProtocol.rawValue)"
     }
 
     /// Parse a port mapping string. Accepts the common Docker/Compose forms:
     ///   "80"                      -> same host and container port
     ///   "8080:80"                 -> explicit host:container
     ///   "8080:80/udp"             -> with protocol
-    ///   "127.0.0.1:8080:80"       -> host-ip:host:container (the host IP is accepted
-    ///                                but not bound separately; publishing host:container
-    ///                                already reaches localhost)
+    ///   "127.0.0.1:8080:80"       -> host-ip:host:container (binds only that host IP)
     /// Port ranges (e.g. "8000-8010:9000-9010") are not yet supported and throw.
+    /// ponytail: bracketed IPv6 host IPs (`[::1]:8080:80`) aren't parsed; split-on-`:`
+    /// only handles IPv4/hostname prefixes. Add a bracket-aware scan if IPv6 is needed.
     public static func parse(_ value: String) throws -> PortMapping {
         let parts = value.split(separator: "/")
         let proto: PortProtocol = parts.count > 1 ? (parts[1] == "udp" ? .udp : .tcp) : .tcp
@@ -156,12 +162,14 @@ public struct PortMapping: Codable, Sendable, CustomStringConvertible {
             }
             return PortMapping(hostPort: host, containerPort: container, portProtocol: proto)
         case 3:
-            // portParts[0] is the host IP (e.g. 127.0.0.1); it is not persisted because
-            // `container run -p host:container` already binds a host-reachable port.
-            guard let host = UInt16(portParts[1]), let container = UInt16(portParts[2]) else {
+            // portParts[0] is the host IP (e.g. 127.0.0.1); bound explicitly so callers can
+            // restrict a published port to loopback rather than the 0.0.0.0 wildcard.
+            let hostIp = String(portParts[0])
+            guard !hostIp.isEmpty,
+                let host = UInt16(portParts[1]), let container = UInt16(portParts[2]) else {
                 throw MockerError.invalidPortMapping(value)
             }
-            return PortMapping(hostPort: host, containerPort: container, portProtocol: proto)
+            return PortMapping(hostPort: host, containerPort: container, portProtocol: proto, hostIp: hostIp)
         default:
             throw MockerError.invalidPortMapping(value)
         }

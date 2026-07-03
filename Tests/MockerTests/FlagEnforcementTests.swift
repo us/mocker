@@ -20,12 +20,28 @@ struct FlagEnforcementTests {
         #expect(pm.portProtocol == .udp)
     }
 
-    @Test("PortMapping parse with host IP prefix")
+    @Test("PortMapping parse with host IP prefix binds that IP")
     func testPortMappingWithHostIP() throws {
         let pm = try PortMapping.parse("127.0.0.1:8080:80")
         #expect(pm.hostPort == 8080)
         #expect(pm.containerPort == 80)
         #expect(pm.portProtocol == .tcp)
+        #expect(pm.hostIp == "127.0.0.1")
+        #expect(pm.description == "127.0.0.1:8080:80/tcp")
+    }
+
+    @Test("PortMapping host IP prefix with protocol")
+    func testPortMappingWithHostIPAndProtocol() throws {
+        let pm = try PortMapping.parse("127.0.0.1:5353:53/udp")
+        #expect(pm.hostIp == "127.0.0.1")
+        #expect(pm.hostPort == 5353)
+        #expect(pm.portProtocol == .udp)
+    }
+
+    @Test("PortMapping without host IP leaves hostIp nil (wildcard bind)")
+    func testPortMappingNoHostIPIsNil() throws {
+        #expect(try PortMapping.parse("8080:80").hostIp == nil)
+        #expect(try PortMapping.parse("80").hostIp == nil)
     }
 
     @Test("PortMapping parse bare container port maps host to same port")

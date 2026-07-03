@@ -170,7 +170,7 @@ public func mapToContainerInspect(_ info: ContainerInfo) -> ContainerInspect {
         info.ports.map { port in
             (
                 "\(port.containerPort)/\(port.portProtocol.rawValue)",
-                [ContainerInspectPortBinding(hostIp: "0.0.0.0", hostPort: String(port.hostPort))]
+                [ContainerInspectPortBinding(hostIp: port.hostIp ?? "0.0.0.0", hostPort: String(port.hostPort))]
             )
         },
         uniquingKeysWith: { first, _ in first }
