@@ -53,12 +53,23 @@ struct Update: AsyncParsableCommand {
     var memorySwap: String?
 
     func run() async throws {
-        // Accept the flags for compatibility but warn if not applicable
+        // Apple's Containerization runtime has no `container update` equivalent: a
+        // container's VM (and therefore its memory/CPU allocation) is sized once at
+        // `run` time and cannot be resized in place. Silently printing the container
+        // ids and a warning (as mocker used to) looks like success but never actually
+        // changes anything — see https://github.com/us/mocker/issues/62. Fail loudly
+        // instead so callers don't believe the limit was applied.
+        if memory != nil || cpus != nil || memoryReservation != nil || memorySwap != nil {
+            throw MockerError.operationFailed(
+                "mocker update cannot resize memory/CPU limits: Apple Containerization sizes " +
+                "a container's VM once at 'mocker run' time and has no live-update support. " +
+                "Recreate the container with the desired --memory/--cpus instead " +
+                "(e.g. 'mocker rm <ctr> && mocker run --memory 3g ...')."
+            )
+        }
+
         for identifier in containers {
             print(identifier)
-        }
-        if memory != nil || cpus != nil {
-            FileHandle.standardError.write(Data("WARNING: Resource limits are managed at VM level with Apple Containerization\n".utf8))
         }
     }
 }

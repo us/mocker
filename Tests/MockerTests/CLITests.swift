@@ -15,6 +15,26 @@ struct CLITests {
         // x-release-please-end
     }
 
+    @Test("Update errors instead of silently ignoring --memory")
+    func updateMemoryErrorsInsteadOfNoOp() async throws {
+        // Apple Containerization sizes a container's VM once at `run` time and has no
+        // live-update path, so `mocker update -m` used to just print a warning and
+        // exit 0 — a silent no-op that looked like success. It must now fail loudly
+        // instead of pretending the limit changed. See #62.
+        let command = try Update.parse(["--memory", "3g", "some-container"])
+        await #expect(throws: MockerError.self) {
+            try await command.run()
+        }
+    }
+
+    @Test("Update errors instead of silently ignoring --cpus")
+    func updateCpusErrorsInsteadOfNoOp() async throws {
+        let command = try Update.parse(["--cpus", "2", "some-container"])
+        await #expect(throws: MockerError.self) {
+            try await command.run()
+        }
+    }
+
     @Test("Run command accepts --env-file flag")
     func runEnvFileFlag() throws {
         let command = try Run.parse(["--env-file", "test.env", "alpine"])

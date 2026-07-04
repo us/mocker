@@ -162,6 +162,62 @@ struct ContainerEngineTests {
         #expect(ContainerEngine.sanitizeCpuCount("3") == "3")
     }
 
+    // MARK: - sanitizeMemory
+
+    @Test("sanitizeMemory uppercases Docker-style lowercase suffixes")
+    func sanitizeMemoryLowercaseSuffix() {
+        // Apple's container CLI only documents uppercase K/M/G/T/P suffixes; mocker's
+        // own --help text advertises Docker-style lowercase ("512m, 1g"), so these must
+        // be normalized or the flag risks being silently rejected/ignored (#62).
+        #expect(ContainerEngine.sanitizeMemory("3g") == "3G")
+        #expect(ContainerEngine.sanitizeMemory("512m") == "512M")
+        #expect(ContainerEngine.sanitizeMemory("2k") == "2K")
+    }
+
+    @Test("sanitizeMemory preserves already-uppercase suffixes")
+    func sanitizeMemoryUppercaseSuffix() {
+        #expect(ContainerEngine.sanitizeMemory("3G") == "3G")
+        #expect(ContainerEngine.sanitizeMemory("512M") == "512M")
+    }
+
+    @Test("sanitizeMemory strips a trailing bytes suffix")
+    func sanitizeMemoryBytesSuffix() {
+        #expect(ContainerEngine.sanitizeMemory("1024b") == "1024")
+        #expect(ContainerEngine.sanitizeMemory("1024B") == "1024")
+    }
+
+    @Test("sanitizeMemory passes through plain byte counts")
+    func sanitizeMemoryPlainBytes() {
+        #expect(ContainerEngine.sanitizeMemory("1073741824") == "1073741824")
+    }
+
+    @Test("sanitizeMemory returns nil for invalid input")
+    func sanitizeMemoryInvalid() {
+        #expect(ContainerEngine.sanitizeMemory("abc") == nil)
+        #expect(ContainerEngine.sanitizeMemory("") == nil)
+        #expect(ContainerEngine.sanitizeMemory("g") == nil)
+    }
+
+    @Test("Run arguments emit a normalized -m flag when memory is set")
+    func testRunArgumentsIncludeNormalizedMemory() {
+        let config = ContainerConfig(image: "alpine", memory: "3g")
+
+        let args = ContainerEngine.buildRunArguments(name: "capped", config: config)
+
+        let idx = args.firstIndex(of: "-m")
+        #expect(idx != nil)
+        if let idx { #expect(args[idx + 1] == "3G") }
+    }
+
+    @Test("Run arguments omit -m when memory is unset")
+    func testRunArgumentsOmitMemoryWhenUnset() {
+        let config = ContainerConfig(image: "alpine")
+
+        let args = ContainerEngine.buildRunArguments(name: "no-limit", config: config)
+
+        #expect(!args.contains("-m"))
+    }
+
     @Test("Run arguments include nested virtualization flags")
     func testRunArgumentsIncludeVirtualizationFlags() {
         let config = ContainerConfig(

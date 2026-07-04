@@ -137,8 +137,8 @@ public actor ContainerEngine {
             args += ["-c", cpuCount]
         }
 
-        if let memory = containerConfig.memory {
-            args += ["-m", memory]
+        if let memory = containerConfig.memory, let normalized = Self.sanitizeMemory(memory) {
+            args += ["-m", normalized]
         }
 
         for t in containerConfig.tmpfs {
@@ -186,6 +186,38 @@ public actor ContainerEngine {
         guard let value = Double(cpus) else { return nil }
         let count = Int(ceil(value))
         return count >= 1 ? String(count) : nil
+    }
+
+    /// Normalize a Docker-style memory value (e.g. `512m`, `3g`, `1.5G`, plain bytes)
+    /// into the form Apple's `container` CLI accepts for `-m/--memory`: an integer
+    /// amount with an optional uppercase `K`/`M`/`G`/`T`/`P` suffix (1 MiByte
+    /// granularity). Apple's parser only documents the uppercase suffixes, so a
+    /// lowercase Docker-style value (which mocker's own `--help` text advertises,
+    /// e.g. "512m, 1g") risked being silently rejected/ignored by the underlying
+    /// runtime, defaulting the VM back to its built-in 1 GiB size. See #62.
+    /// Returns `nil` (dropping the flag) only for genuinely unparsable input.
+    static func sanitizeMemory(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+
+        let suffixes: Set<Character> = ["b", "B", "k", "K", "m", "M", "g", "G", "t", "T", "p", "P"]
+        guard let last = trimmed.last else { return nil }
+
+        if suffixes.contains(last) {
+            let numberPart = trimmed.dropLast()
+            guard !numberPart.isEmpty, Double(numberPart) != nil else { return nil }
+            // Docker allows a trailing "b" (bytes) which Apple's CLI doesn't document;
+            // drop it since bytes are the implicit unit when no suffix is given.
+            let upper = last.uppercased()
+            if upper == "B" {
+                return String(numberPart)
+            }
+            return "\(numberPart)\(upper)"
+        }
+
+        // No suffix: must be a plain byte count.
+        guard Double(trimmed) != nil else { return nil }
+        return trimmed
     }
 
     // MARK: - List

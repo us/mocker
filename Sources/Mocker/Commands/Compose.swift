@@ -1190,16 +1190,49 @@ struct ComposeConfig: AsyncParsableCommand {
             return
         }
 
-        // Print resolved compose file as YAML-like output
-        print("name: \(options.projectName ?? "default")")
-        print("services:")
+        print(Self.renderConfig(composeFile: composeFile, projectName: options.projectName))
+    }
+
+    /// Render the resolved Compose file as YAML-like output, mirroring what `up`
+    /// will actually apply. Extracted as a pure function (rather than inline
+    /// `print` calls) so it's directly unit-testable without capturing stdout.
+    ///
+    /// Resource limits (`mem_limit`/`cpus` and their `deploy.resources` equivalents)
+    /// are wired into the container's `-m`/`-c` flags by `ComposeOrchestrator.
+    /// startService` — this must surface them too, or `config` misleadingly implies
+    /// they're dropped (see #62).
+    static func renderConfig(composeFile: ComposeFile, projectName: String?) -> String {
+        var lines: [String] = []
+        lines.append("name: \(projectName ?? "default")")
+        lines.append("services:")
         for (name, svc) in composeFile.services.sorted(by: { $0.key < $1.key }) {
-            print("  \(name):")
-            if let image = svc.image { print("    image: \(image)") }
-            if let build = svc.build { print("    build: \(build)") }
-            if !svc.ports.isEmpty { print("    ports:"); svc.ports.forEach { print("      - \($0)") } }
-            if !svc.environment.isEmpty { print("    environment:"); svc.environment.forEach { print("      - \($0)") } }
+            lines.append("  \(name):")
+            if let image = svc.image { lines.append("    image: \(image)") }
+            if let build = svc.build { lines.append("    build: \(build)") }
+            if !svc.ports.isEmpty {
+                lines.append("    ports:")
+                svc.ports.forEach { lines.append("      - \($0)") }
+            }
+            if !svc.environment.isEmpty {
+                lines.append("    environment:")
+                svc.environment.forEach { lines.append("      - \($0)") }
+            }
+            if svc.memLimit != nil || svc.cpus != nil || svc.memReservation != nil || svc.cpusReservation != nil {
+                lines.append("    deploy:")
+                lines.append("      resources:")
+                if svc.memLimit != nil || svc.cpus != nil {
+                    lines.append("        limits:")
+                    if let cpus = svc.cpus { lines.append("          cpus: \"\(cpus)\"") }
+                    if let mem = svc.memLimit { lines.append("          memory: \(mem)") }
+                }
+                if svc.memReservation != nil || svc.cpusReservation != nil {
+                    lines.append("        reservations:")
+                    if let cpus = svc.cpusReservation { lines.append("          cpus: \"\(cpus)\"") }
+                    if let mem = svc.memReservation { lines.append("          memory: \(mem)") }
+                }
+            }
         }
+        return lines.joined(separator: "\n")
     }
 }
 

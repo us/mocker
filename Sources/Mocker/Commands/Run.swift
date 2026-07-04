@@ -346,6 +346,12 @@ struct Run: AsyncParsableCommand {
         if !deviceWriteIops.isEmpty { unsupported.append("--device-write-iops") }
         if healthCmd != nil { unsupported.append("--health-cmd") }
         if `init` { unsupported.append("--init") }
+        // Apple Containerization has no swap concept (each container is a VM with a
+        // fixed memory allocation, not a cgroup) — accepting these silently would hide
+        // that a swap-based safety net for over-limit spikes never actually exists. See #62.
+        if memorySwap != nil { unsupported.append("--memory-swap") }
+        if memorySwappiness != nil { unsupported.append("--memory-swappiness") }
+        if memoryReservation != nil { unsupported.append("--memory-reservation") }
         if !unsupported.isEmpty {
             let flags = unsupported.joined(separator: ", ")
             FileHandle.standardError.write(Data("WARNING: flags not supported by Apple Containerization runtime (ignored): \(flags)\n".utf8))
