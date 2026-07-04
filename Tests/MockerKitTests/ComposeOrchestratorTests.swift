@@ -1,8 +1,11 @@
+import Foundation
 import Testing
 @testable import MockerKit
 
 @Suite("ComposeOrchestrator Tests")
 struct ComposeOrchestratorTests {
+    /// Default project directory used by tests that don't care where sources anchor.
+    private static let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
 
     @Test("Service order respects depends_on chain")
     func testServiceOrderChain() throws {
@@ -158,7 +161,7 @@ struct ComposeOrchestratorTests {
 
     @Test("Absolute bind mount included as-is")
     func resolveAbsoluteBindMount() throws {
-        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["/host/data:/container/data"])
+        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["/host/data:/container/data"], projectDir: Self.cwd)
         #expect(mounts.count == 1)
         #expect(mounts[0].source == "/host/data")
         #expect(mounts[0].destination == "/container/data")
@@ -173,7 +176,7 @@ struct ComposeOrchestratorTests {
         ]
     )
     func resolveRelativeStyleMounts(spec: String, suffix: String, destination: String) throws {
-        let mounts = try ComposeOrchestrator.resolveVolumeMounts([spec])
+        let mounts = try ComposeOrchestrator.resolveVolumeMounts([spec], projectDir: Self.cwd)
         #expect(mounts.count == 1)
         #expect(mounts[0].source.hasPrefix("/"))
         #expect(mounts[0].source.hasSuffix(suffix))
@@ -182,13 +185,13 @@ struct ComposeOrchestratorTests {
 
     @Test("Named volume skipped")
     func skipNamedVolume() throws {
-        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["mydata:/container/data"])
+        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["mydata:/container/data"], projectDir: Self.cwd)
         #expect(mounts.isEmpty)
     }
 
     @Test("Anonymous volume included")
     func includeAnonymousVolume() throws {
-        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["/container/data"])
+        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["/container/data"], projectDir: Self.cwd)
         #expect(mounts.count == 1)
         #expect(mounts[0].source == "")
         #expect(mounts[0].destination == "/container/data")
@@ -202,7 +205,7 @@ struct ComposeOrchestratorTests {
             "namedvol:/app/named",
             "/app/anon",
             "sub/dir:/app/sub",
-        ])
+        ], projectDir: Self.cwd)
         #expect(mounts.count == 4)  // namedvol skipped
         let sources = mounts.map(\.source)
         #expect(sources.contains("/abs/path"))
@@ -213,7 +216,7 @@ struct ComposeOrchestratorTests {
 
     @Test("Read-only relative bind mount preserves ro flag")
     func resolveRelativeReadOnly() throws {
-        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["./data:/container/data:ro"])
+        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["./data:/container/data:ro"], projectDir: Self.cwd)
         #expect(mounts.count == 1)
         #expect(mounts[0].readOnly == true)
         #expect(mounts[0].destination == "/container/data")
@@ -222,7 +225,7 @@ struct ComposeOrchestratorTests {
 
     @Test("Home-relative path resolved")
     func resolveHomeRelativePath() throws {
-        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["~/data:/container/data"])
+        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["~/data:/container/data"], projectDir: Self.cwd)
         #expect(mounts.count == 1)
         #expect(mounts[0].source.hasPrefix("/"))
         #expect(mounts[0].source.contains("data"))
@@ -449,5 +452,29 @@ struct ComposeOrchestratorTests {
             noRecreate: false
         )
         #expect(actions.isEmpty)
+    }
+
+    @Test("Relative bind-mount source anchors to project directory, not CWD (issue #60)")
+    func resolveRelativeBindMountAnchorsToProjectDirectory() throws {
+        // Use a project directory that is guaranteed to differ from the process CWD.
+        let projectDir = URL(fileURLWithPath: "/tmp/mocker-issue-60-project")
+        let mounts = try ComposeOrchestrator.resolveVolumeMounts(
+            ["./data:/container/data"],
+            projectDir: projectDir
+        )
+        #expect(mounts.count == 1)
+        #expect(mounts[0].source == "/tmp/mocker-issue-60-project/data")
+        #expect(mounts[0].source != URL(fileURLWithPath: "./data").standardized.path)
+    }
+
+    @Test("Parent-relative bind-mount source anchors to project directory, not CWD (issue #60)")
+    func resolveParentRelativeBindMountAnchorsToProjectDirectory() throws {
+        let projectDir = URL(fileURLWithPath: "/tmp/mocker-issue-60-project/nested")
+        let mounts = try ComposeOrchestrator.resolveVolumeMounts(
+            ["../shared:/container/shared"],
+            projectDir: projectDir
+        )
+        #expect(mounts.count == 1)
+        #expect(mounts[0].source == "/tmp/mocker-issue-60-project/shared")
     }
 }

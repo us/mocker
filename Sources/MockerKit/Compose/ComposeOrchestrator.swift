@@ -304,7 +304,7 @@ public actor ComposeOrchestrator {
         // Parse port mappings
         let ports = try service.ports.map { try PortMapping.parse($0) }
 
-        let volumes = try Self.resolveVolumeMounts(service.volumes)
+        let volumes = try Self.resolveVolumeMounts(service.volumes, projectDir: projectDir)
 
         let config = ContainerConfig(
             name: containerName,
@@ -346,9 +346,11 @@ public actor ComposeOrchestrator {
     /// on init.
     ///
     /// Relative paths (`./foo`, `../bar`, `data/dir`) are resolved to absolute paths
-    /// against the current working directory. This matches Docker Compose behaviour
-    /// because `mocker compose` is run from the project directory.
-    static func resolveVolumeMounts(_ volSpecs: [String]) throws -> [VolumeMount] {
+    /// against `projectDir` (the Compose `--project-directory`, i.e. the directory
+    /// containing the compose file unless overridden). This matches Docker Compose
+    /// behaviour, where bind-mount sources are anchored to the project directory
+    /// rather than the process's current working directory.
+    static func resolveVolumeMounts(_ volSpecs: [String], projectDir: URL) throws -> [VolumeMount] {
         var volumes: [VolumeMount] = []
         for volSpec in volSpecs {
             var mount = try VolumeMount.parse(volSpec)
@@ -356,10 +358,12 @@ public actor ComposeOrchestrator {
                 volumes.append(mount)
             } else if mount.source.hasPrefix("/") {
                 volumes.append(mount)
+            } else if mount.source.hasPrefix("~") {
+                mount.source = (mount.source as NSString).expandingTildeInPath
+                volumes.append(mount)
             } else if mount.source.hasPrefix(".")
-                      || mount.source.hasPrefix("~")
                       || mount.source.contains("/") {
-                mount.source = URL(fileURLWithPath: mount.source).path
+                mount.source = projectDir.appendingPathComponent(mount.source).standardized.path
                 volumes.append(mount)
             }
         }
