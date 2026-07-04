@@ -77,7 +77,8 @@ public actor ComposeOrchestrator {
                 ObservedContainer(
                     name: container.name,
                     serviceName: container.labels["com.mocker.compose.service"] ?? "",
-                    configHash: container.labels["com.mocker.compose.config-hash"]
+                    configHash: container.labels["com.mocker.compose.config-hash"],
+                    state: container.state
                 )
             } ?? []
         let actions = Self.reconcileDecision(
@@ -91,8 +92,19 @@ public actor ComposeOrchestrator {
         for action in actions {
             switch action.kind {
             case .keep:
+                // Already running and config-hash matches: true no-op, no engine calls.
                 skipSet.insert(action.serviceName)
                 events.append(.containerRunning("\(projectName)-\(action.serviceName)-1"))
+            case .start:
+                // Config-hash matches but the container isn't running (stopped, exited,
+                // or crashed) — start the existing container instead of recreating it.
+                // This mirrors Docker Compose: a no-op reconcile still starts stopped
+                // containers, it just doesn't recreate them.
+                skipSet.insert(action.serviceName)
+                if let existing = observed.first(where: { $0.serviceName == action.serviceName }),
+                   let started = try? await engine.start(existing.name) {
+                    events.append(.containerRunning(started.name))
+                }
             case .removeAndRecreate:
                 if let existing = observed.first(where: { $0.serviceName == action.serviceName }) {
                     if let live = (try? await engine.list(all: true))?.first(where: { $0.name == existing.name }),
@@ -373,8 +385,10 @@ extension ComposeOrchestrator {
                 kind = .noOp
             case (_, true, _):
                 kind = .removeAndRecreate
-            case (_, _, true):
-                kind = .keep
+            case (let .some(obs), _, true):
+                // --no-recreate never replaces an existing container, but a stopped one
+                // still needs to be started — Docker's reconcile is not a pure skip.
+                kind = obs.state == .running ? .keep : .start
             case (let .some(obs), false, false):
                 let expectedHash = ComposeService.hash(of: service)
                 if obs.configHash != expectedHash {
@@ -382,7 +396,7 @@ extension ComposeOrchestrator {
                 } else if let digest = obs.imageDigest, digest != service.image {
                     kind = .removeAndRecreate
                 } else {
-                    kind = .keep
+                    kind = obs.state == .running ? .keep : .start
                 }
             }
             return ReconcileAction(serviceName: serviceName, kind: kind)
@@ -417,7 +431,10 @@ public struct ObservedContainer: Sendable, Equatable {
 /// Per-service action emitted by `ComposeOrchestrator.reconcileDecision`.
 public struct ReconcileAction: Sendable, Equatable {
     public enum Kind: Sendable, Equatable {
+        /// Container is already running and its config hash matches: true no-op.
         case keep
+        /// Config hash matches but the container isn't running: start it in place.
+        case start
         case removeAndRecreate
         case noOp
     }

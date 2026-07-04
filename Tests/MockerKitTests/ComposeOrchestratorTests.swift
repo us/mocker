@@ -239,8 +239,13 @@ struct ComposeOrchestratorTests {
         """)
     }
 
-    private func observed(name: String, serviceName: String, configHash: String?) -> ObservedContainer {
-        ObservedContainer(name: name, serviceName: serviceName, configHash: configHash)
+    private func observed(
+        name: String,
+        serviceName: String,
+        configHash: String?,
+        state: ContainerState = .running
+    ) -> ObservedContainer {
+        ObservedContainer(name: name, serviceName: serviceName, configHash: configHash, state: state)
     }
 
     @Test("reconcileDecision: observed container matches hash + defaults → .keep")
@@ -298,6 +303,92 @@ struct ComposeOrchestratorTests {
         let actions = ComposeOrchestrator.reconcileDecision(
             observedContainers: [
                 observed(name: "proj-app-1", serviceName: "app", configHash: "sha256:different")
+            ],
+            composeFile: file,
+            projectName: "proj",
+            forceRecreate: false,
+            noRecreate: false
+        )
+        #expect(actions == [ReconcileAction(serviceName: "app", kind: .removeAndRecreate)])
+    }
+
+    @Test("reconcileDecision: stopped container + matching hash + defaults → .start (not .keep)")
+    func reconcileStoppedContainerMatchingHashStarts() throws {
+        let file = try singleServiceFile()
+        let svc = file.services["app"]!
+        let hash = ComposeService.hash(of: svc)
+        let actions = ComposeOrchestrator.reconcileDecision(
+            observedContainers: [
+                observed(name: "proj-app-1", serviceName: "app", configHash: hash, state: .stopped)
+            ],
+            composeFile: file,
+            projectName: "proj",
+            forceRecreate: false,
+            noRecreate: false
+        )
+        #expect(actions == [ReconcileAction(serviceName: "app", kind: .start)])
+    }
+
+    @Test(
+        "reconcileDecision: non-running container + matching hash + defaults → .start",
+        arguments: [ContainerState.stopped, .exited, .created, .dead]
+    )
+    func reconcileNonRunningStatesStart(state: ContainerState) throws {
+        let file = try singleServiceFile()
+        let svc = file.services["app"]!
+        let hash = ComposeService.hash(of: svc)
+        let actions = ComposeOrchestrator.reconcileDecision(
+            observedContainers: [
+                observed(name: "proj-app-1", serviceName: "app", configHash: hash, state: state)
+            ],
+            composeFile: file,
+            projectName: "proj",
+            forceRecreate: false,
+            noRecreate: false
+        )
+        #expect(actions == [ReconcileAction(serviceName: "app", kind: .start)])
+    }
+
+    @Test("reconcileDecision: running container + matching hash + defaults → .keep")
+    func reconcileRunningContainerMatchingHashKeeps() throws {
+        let file = try singleServiceFile()
+        let svc = file.services["app"]!
+        let hash = ComposeService.hash(of: svc)
+        let actions = ComposeOrchestrator.reconcileDecision(
+            observedContainers: [
+                observed(name: "proj-app-1", serviceName: "app", configHash: hash, state: .running)
+            ],
+            composeFile: file,
+            projectName: "proj",
+            forceRecreate: false,
+            noRecreate: false
+        )
+        #expect(actions == [ReconcileAction(serviceName: "app", kind: .keep)])
+    }
+
+    @Test("reconcileDecision: stopped container + matching hash + --no-recreate → .start")
+    func reconcileStoppedContainerNoRecreateStarts() throws {
+        let file = try singleServiceFile()
+        let svc = file.services["app"]!
+        let hash = ComposeService.hash(of: svc)
+        let actions = ComposeOrchestrator.reconcileDecision(
+            observedContainers: [
+                observed(name: "proj-app-1", serviceName: "app", configHash: hash, state: .stopped)
+            ],
+            composeFile: file,
+            projectName: "proj",
+            forceRecreate: false,
+            noRecreate: true
+        )
+        #expect(actions == [ReconcileAction(serviceName: "app", kind: .start)])
+    }
+
+    @Test("reconcileDecision: stopped container + diverged hash + defaults → .removeAndRecreate (not .start)")
+    func reconcileStoppedContainerDivergedHashRecreates() throws {
+        let file = try singleServiceFile()
+        let actions = ComposeOrchestrator.reconcileDecision(
+            observedContainers: [
+                observed(name: "proj-app-1", serviceName: "app", configHash: "sha256:different", state: .stopped)
             ],
             composeFile: file,
             projectName: "proj",
