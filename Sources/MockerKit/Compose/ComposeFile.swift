@@ -1,5 +1,6 @@
 import Foundation
 import Yams
+import CryptoKit
 
 /// Represents a parsed docker-compose.yml file.
 public struct ComposeFile: Sendable {
@@ -263,6 +264,28 @@ public struct ComposeService: Sendable {
     public var restartPolicyMaxAttempts: Int?
     public var restartPolicyWindow: String?
 
+    private enum HashCodingKeys: String, CodingKey {
+        case name, image, command, environment, ports, volumes, networks
+        case restart, labels, hostname, workingDir
+        case memLimit, cpus, memReservation, cpusReservation, memSwapLimit
+        case shmSize, pidsLimit
+        case restartPolicyDelay, restartPolicyMaxAttempts, restartPolicyWindow
+    }
+
+    /// Compute a stable `sha256:<hex>` hash of the normalized service config.
+    ///
+    /// `sortedKeys` is mandatory: without it, two services with identical content but
+    /// different source-field order would hash differently. Mirrors Docker's
+    /// `ServiceHash` algorithm at `pkg/compose/hash.go:27-43`.
+    public static func hash(of service: ComposeService) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = (try? encoder.encode(service)) ?? Data()
+        let digest = SHA256.hash(data: data)
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return "sha256:" + hex
+    }
+
     public static func parse(name: String, from dict: [String: Any]) throws -> ComposeService {
         let environment = parseEnvironment(dict["environment"])
         let ports = (dict["ports"] as? [Any])?.compactMap { "\($0)" } ?? []
@@ -524,6 +547,36 @@ struct RestartPolicyConfig: Sendable {
     var delay: String?
     var maxAttempts: Int?
     var window: String?
+}
+
+extension ComposeService: Encodable {
+    /// Emits only the hash-relevant fields per `HashCodingKeys`, excluding
+    /// Docker-normalized fields (`Build`, `DependsOn`, etc.). Used by
+    /// `hash(of:)`; not intended as a general-purpose service serializer.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: HashCodingKeys.self)
+        try c.encode(name, forKey: .name)
+        try c.encodeIfPresent(image, forKey: .image)
+        try c.encode(command, forKey: .command)
+        try c.encode(environment, forKey: .environment)
+        try c.encode(ports, forKey: .ports)
+        try c.encode(volumes, forKey: .volumes)
+        try c.encode(networks, forKey: .networks)
+        try c.encodeIfPresent(restart, forKey: .restart)
+        try c.encode(labels, forKey: .labels)
+        try c.encodeIfPresent(hostname, forKey: .hostname)
+        try c.encodeIfPresent(workingDir, forKey: .workingDir)
+        try c.encodeIfPresent(memLimit, forKey: .memLimit)
+        try c.encodeIfPresent(cpus, forKey: .cpus)
+        try c.encodeIfPresent(memReservation, forKey: .memReservation)
+        try c.encodeIfPresent(cpusReservation, forKey: .cpusReservation)
+        try c.encodeIfPresent(memSwapLimit, forKey: .memSwapLimit)
+        try c.encodeIfPresent(shmSize, forKey: .shmSize)
+        try c.encodeIfPresent(pidsLimit, forKey: .pidsLimit)
+        try c.encodeIfPresent(restartPolicyDelay, forKey: .restartPolicyDelay)
+        try c.encodeIfPresent(restartPolicyMaxAttempts, forKey: .restartPolicyMaxAttempts)
+        try c.encodeIfPresent(restartPolicyWindow, forKey: .restartPolicyWindow)
+    }
 }
 
 /// Build configuration for a compose service.

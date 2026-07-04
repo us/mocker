@@ -6,6 +6,7 @@ public enum ComposeEvent: Sendable {
     case volumeCreated(String)
     case containerCreated(String)
     case containerStarted(String)
+    case containerRunning(String)
     case containerStopped(String)
     case containerRemoved(String)
     case networkRemoved(String)
@@ -40,11 +41,16 @@ public actor ComposeOrchestrator {
     /// - Parameters:
     ///   - build: force-build images even if they already exist (compose `--build`).
     ///   - noBuild: never build, pull `image:` instead (compose `--no-build`).
+    ///   - forceRecreate: recreate every project container regardless of hash
+    ///     (compose `--force-recreate`).
+    ///   - noRecreate: never recreate existing project containers (compose `--no-recreate`).
     public func up(
         composeFile: ComposeFile,
         detach: Bool = false,
         build: Bool = false,
-        noBuild: Bool = false
+        noBuild: Bool = false,
+        forceRecreate: Bool = false,
+        noRecreate: Bool = false
     ) async throws -> [ComposeEvent] {
         var events: [ComposeEvent] = []
 
@@ -64,11 +70,49 @@ public actor ComposeOrchestrator {
             }
         }
 
+        let prefix = "\(projectName)-"
+        let observed = (try? await engine.list(all: true))?
+            .filter { $0.name.hasPrefix(prefix) }
+            .map { container -> ObservedContainer in
+                ObservedContainer(
+                    name: container.name,
+                    serviceName: container.labels["com.mocker.compose.service"] ?? "",
+                    configHash: container.labels["com.mocker.compose.config-hash"]
+                )
+            } ?? []
+        let actions = Self.reconcileDecision(
+            observedContainers: observed,
+            composeFile: composeFile,
+            projectName: projectName,
+            forceRecreate: forceRecreate,
+            noRecreate: noRecreate
+        )
+        var skipSet: Set<String> = []
+        for action in actions {
+            switch action.kind {
+            case .keep:
+                skipSet.insert(action.serviceName)
+                events.append(.containerRunning("\(projectName)-\(action.serviceName)-1"))
+            case .removeAndRecreate:
+                if let existing = observed.first(where: { $0.serviceName == action.serviceName }) {
+                    if let live = (try? await engine.list(all: true))?.first(where: { $0.name == existing.name }),
+                       live.state.isActive {
+                        _ = try? await engine.stop(live.id)
+                        events.append(.containerStopped(live.name))
+                    }
+                    _ = try? await engine.remove(existing.name, force: true)
+                    events.append(.containerRemoved(existing.name))
+                }
+            case .noOp:
+                break
+            }
+        }
+
         // Start services in dependency order
         let order = composeFile.serviceOrder()
         var startedContainers: [(serviceName: String, info: ContainerInfo)] = []
 
-        for serviceName in order {
+        for serviceName in order where !skipSet.contains(serviceName) {
             guard let service = composeFile.services[serviceName] else { continue }
             let info = try await startService(service, detach: detach, forceBuild: build, noBuild: noBuild)
             let containerName = "\(projectName)-\(service.name)-1"
@@ -260,7 +304,11 @@ public actor ComposeOrchestrator {
             network: service.networks.first.map { "\(projectName)-\($0)" },
             detach: detach,
             labels: service.labels.merging(
-                ["com.mocker.compose.project": projectName, "com.mocker.compose.service": service.name]
+                [
+                    "com.mocker.compose.project": projectName,
+                    "com.mocker.compose.service": service.name,
+                    "com.mocker.compose.config-hash": ComposeService.hash(of: service),
+                ]
             ) { _, new in new },
             workingDir: service.workingDir,
             hostname: service.hostname,
@@ -304,5 +352,81 @@ public actor ComposeOrchestrator {
             }
         }
         return volumes
+    }
+}
+extension ComposeOrchestrator {
+    /// Pure helper that returns one `ReconcileAction` per service in the project.
+    /// Mirrors Docker's `mustRecreate` at `pkg/compose/reconcile.go:517-543`.
+    public nonisolated static func reconcileDecision(
+        observedContainers: [ObservedContainer],
+        composeFile: ComposeFile,
+        projectName: String,
+        forceRecreate: Bool,
+        noRecreate: Bool
+    ) -> [ReconcileAction] {
+        composeFile.serviceOrder().compactMap { serviceName -> ReconcileAction? in
+            guard let service = composeFile.services[serviceName] else { return nil }
+            let observed = observedContainers.first { $0.serviceName == serviceName }
+            let kind: ReconcileAction.Kind
+            switch (observed, forceRecreate, noRecreate) {
+            case (.none, _, _):
+                kind = .noOp
+            case (_, true, _):
+                kind = .removeAndRecreate
+            case (_, _, true):
+                kind = .keep
+            case (let .some(obs), false, false):
+                let expectedHash = ComposeService.hash(of: service)
+                if obs.configHash != expectedHash {
+                    kind = .removeAndRecreate
+                } else if let digest = obs.imageDigest, digest != service.image {
+                    kind = .removeAndRecreate
+                } else {
+                    kind = .keep
+                }
+            }
+            return ReconcileAction(serviceName: serviceName, kind: kind)
+        }
+    }
+}
+
+/// Snapshot of a project container as observed by `engine.list(all: true)`, scoped to
+/// the per-service decision inputs (`configHash`, `imageDigest`, `serviceName`).
+public struct ObservedContainer: Sendable, Equatable {
+    public let name: String
+    public let serviceName: String
+    public let configHash: String?
+    public let imageDigest: String?
+    public let state: ContainerState
+
+    public init(
+        name: String,
+        serviceName: String,
+        configHash: String? = nil,
+        imageDigest: String? = nil,
+        state: ContainerState = .running
+    ) {
+        self.name = name
+        self.serviceName = serviceName
+        self.configHash = configHash
+        self.imageDigest = imageDigest
+        self.state = state
+    }
+}
+
+/// Per-service action emitted by `ComposeOrchestrator.reconcileDecision`.
+public struct ReconcileAction: Sendable, Equatable {
+    public enum Kind: Sendable, Equatable {
+        case keep
+        case removeAndRecreate
+        case noOp
+    }
+
+    public let serviceName: String
+    public let kind: Kind
+
+    public init(serviceName: String, kind: Kind) {
+        self.serviceName = serviceName
+        self.kind = kind
     }
 }

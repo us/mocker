@@ -228,4 +228,135 @@ struct ComposeOrchestratorTests {
         #expect(mounts[0].source.contains("data"))
         #expect(mounts[0].destination == "/container/data")
     }
+
+    // MARK: - reconcileDecision (issue #59)
+
+    private func singleServiceFile() throws -> ComposeFile {
+        try ComposeFile.parse("""
+        services:
+          app:
+            image: nginx:alpine
+        """)
+    }
+
+    private func observed(name: String, serviceName: String, configHash: String?) -> ObservedContainer {
+        ObservedContainer(name: name, serviceName: serviceName, configHash: configHash)
+    }
+
+    @Test("reconcileDecision: observed container matches hash + defaults → .keep")
+    func reconcileObservedMatchesDefaults() throws {
+        let file = try singleServiceFile()
+        let svc = file.services["app"]!
+        let hash = ComposeService.hash(of: svc)
+        let actions = ComposeOrchestrator.reconcileDecision(
+            observedContainers: [
+                observed(name: "proj-app-1", serviceName: "app", configHash: hash)
+            ],
+            composeFile: file,
+            projectName: "proj",
+            forceRecreate: false,
+            noRecreate: false
+        )
+        #expect(actions == [ReconcileAction(serviceName: "app", kind: .keep)])
+    }
+
+    @Test("reconcileDecision: observed container matches hash + --force-recreate → .removeAndRecreate")
+    func reconcileForceRecreateOverridesKeep() throws {
+        let file = try singleServiceFile()
+        let svc = file.services["app"]!
+        let hash = ComposeService.hash(of: svc)
+        let actions = ComposeOrchestrator.reconcileDecision(
+            observedContainers: [
+                observed(name: "proj-app-1", serviceName: "app", configHash: hash)
+            ],
+            composeFile: file,
+            projectName: "proj",
+            forceRecreate: true,
+            noRecreate: false
+        )
+        #expect(actions == [ReconcileAction(serviceName: "app", kind: .removeAndRecreate)])
+    }
+
+    @Test("reconcileDecision: observed container matches hash + --no-recreate → .keep")
+    func reconcileNoRecreateEvenWithDrift() throws {
+        let file = try singleServiceFile()
+        let actions = ComposeOrchestrator.reconcileDecision(
+            observedContainers: [
+                observed(name: "proj-app-1", serviceName: "app", configHash: "stale-different-value")
+            ],
+            composeFile: file,
+            projectName: "proj",
+            forceRecreate: false,
+            noRecreate: true
+        )
+        #expect(actions == [ReconcileAction(serviceName: "app", kind: .keep)])
+    }
+
+    @Test("reconcileDecision: observed container has diverged hash + defaults → .removeAndRecreate")
+    func reconcileHashDriftDefaults() throws {
+        let file = try singleServiceFile()
+        let actions = ComposeOrchestrator.reconcileDecision(
+            observedContainers: [
+                observed(name: "proj-app-1", serviceName: "app", configHash: "sha256:different")
+            ],
+            composeFile: file,
+            projectName: "proj",
+            forceRecreate: false,
+            noRecreate: false
+        )
+        #expect(actions == [ReconcileAction(serviceName: "app", kind: .removeAndRecreate)])
+    }
+
+    @Test("reconcileDecision: multiple services + --force-recreate → all .removeAndRecreate")
+    func reconcileMultipleServicesForceRecreate() throws {
+        let file = try ComposeFile.parse("""
+        services:
+          web:
+            image: nginx:alpine
+          db:
+            image: redis:7
+        """)
+        let actions = ComposeOrchestrator.reconcileDecision(
+            observedContainers: [
+                observed(name: "proj-web-1", serviceName: "web", configHash: ComposeService.hash(of: file.services["web"]!)),
+                observed(name: "proj-db-1", serviceName: "db", configHash: ComposeService.hash(of: file.services["db"]!)),
+            ],
+            composeFile: file,
+            projectName: "proj",
+            forceRecreate: true,
+            noRecreate: false
+        )
+        #expect(actions == [
+            ReconcileAction(serviceName: "db", kind: .removeAndRecreate),
+            ReconcileAction(serviceName: "web", kind: .removeAndRecreate),
+        ])
+    }
+
+    @Test("reconcileDecision: empty observedContainers (post-prefix-filter) → all .noOp")
+    func reconcileIgnoresForeignProject() throws {
+        let file = try singleServiceFile()
+        let actions = ComposeOrchestrator.reconcileDecision(
+            observedContainers: [],
+            composeFile: file,
+            projectName: "proj",
+            forceRecreate: false,
+            noRecreate: false
+        )
+        #expect(actions == [ReconcileAction(serviceName: "app", kind: .noOp)])
+    }
+
+    @Test("reconcileDecision: empty composeFile → empty actions list")
+    func reconcileEmptyFile() {
+        let empty = ComposeFile()
+        let actions = ComposeOrchestrator.reconcileDecision(
+            observedContainers: [
+                observed(name: "proj-app-1", serviceName: "app", configHash: "sha256:x")
+            ],
+            composeFile: empty,
+            projectName: "proj",
+            forceRecreate: false,
+            noRecreate: false
+        )
+        #expect(actions.isEmpty)
+    }
 }

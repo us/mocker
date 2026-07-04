@@ -109,6 +109,7 @@ enum ComposeFormatter {
         case .volumeCreated(let name): ("Volume \(name)", "Created")
         case .containerCreated(let name): ("Container \(name)", "Created")
         case .containerStarted(let name): ("Container \(name)", "Started")
+        case .containerRunning(let name): ("Container \(name)", "Running")
         case .containerStopped(let name): ("Container \(name)", "Stopped")
         case .containerRemoved(let name): ("Container \(name)", "Removed")
         case .networkRemoved(let name): ("Network \(name)", "Removed")
@@ -219,6 +220,12 @@ struct ComposeUp: AsyncParsableCommand {
     @Argument(help: "Services to start (starts all if omitted)")
     var services: [String] = []
 
+    mutating func validate() throws {
+        if forceRecreate && noRecreate {
+            throw ValidationError("--force-recreate and --no-recreate are mutually exclusive")
+        }
+    }
+
     func run() async throws {
         var (composeFile, project, projectDir) = try options.loadCompose()
         let config = MockerConfig()
@@ -244,7 +251,14 @@ struct ComposeUp: AsyncParsableCommand {
         )
 
         let totalResources = composeFile.networks.count + composeFile.volumes.count + composeFile.services.count
-        let events = try await orchestrator.up(composeFile: composeFile, detach: detach, build: build, noBuild: noBuild)
+        let events = try await orchestrator.up(
+            composeFile: composeFile,
+            detach: detach,
+            build: build,
+            noBuild: noBuild,
+            forceRecreate: forceRecreate,
+            noRecreate: noRecreate
+        )
         ComposeFormatter.printEvents(events, total: totalResources)
     }
 }
@@ -1253,6 +1267,12 @@ struct ComposeCreate: AsyncParsableCommand {
     @Argument(help: "Services to create (creates all if omitted)")
     var services: [String] = []
 
+    mutating func validate() throws {
+        if forceRecreate && noRecreate {
+            throw ValidationError("--force-recreate and --no-recreate are mutually exclusive")
+        }
+    }
+
     func run() async throws {
         // create is essentially up without starting — for now delegate to up
         var (composeFile, project, projectDir) = try options.loadCompose()
@@ -1277,7 +1297,14 @@ struct ComposeCreate: AsyncParsableCommand {
             volumeManager: volumeManager
         )
 
-        let events = try await orchestrator.up(composeFile: composeFile, detach: true, build: build, noBuild: noBuild)
+        let events = try await orchestrator.up(
+            composeFile: composeFile,
+            detach: true,
+            build: build,
+            noBuild: noBuild,
+            forceRecreate: forceRecreate,
+            noRecreate: noRecreate
+        )
         ComposeFormatter.printEvents(events, total: events.count)
     }
 }

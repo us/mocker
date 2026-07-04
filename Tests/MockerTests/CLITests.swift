@@ -53,6 +53,58 @@ struct CLITests {
         #expect(command.options.projectDirectory == "/tmp/myproj")
     }
 
+    @Test("Compose up parses --force-recreate")
+    func composeUpForceRecreateFlag() throws {
+        let command = try ComposeUp.parse(["-d", "--force-recreate"])
+        #expect(command.forceRecreate == true)
+        #expect(command.noRecreate == false)
+    }
+
+    @Test("Compose up parses --no-recreate")
+    func composeUpNoRecreateFlag() throws {
+        let command = try ComposeUp.parse(["-d", "--no-recreate"])
+        #expect(command.noRecreate == true)
+        #expect(command.forceRecreate == false)
+    }
+
+    @Test("Compose up rejects --force-recreate + --no-recreate together")
+    func composeUpForceAndNoRecreateConflict() throws {
+        do {
+            _ = try ComposeUp.parse(["-d", "--force-recreate", "--no-recreate"])
+            Issue.record("expected parse() to throw")
+        } catch {
+            let msg = String(describing: error)
+            #expect(msg.contains("--force-recreate"))
+            #expect(msg.contains("--no-recreate"))
+        }
+    }
+
+    @Test("Compose create parses --force-recreate")
+    func composeCreateForceRecreateFlag() throws {
+        let command = try ComposeCreate.parse(["--force-recreate"])
+        #expect(command.forceRecreate == true)
+        #expect(command.noRecreate == false)
+    }
+
+    @Test("Compose create parses --no-recreate")
+    func composeCreateNoRecreateFlag() throws {
+        let command = try ComposeCreate.parse(["--no-recreate"])
+        #expect(command.noRecreate == true)
+        #expect(command.forceRecreate == false)
+    }
+
+    @Test("Compose create rejects --force-recreate + --no-recreate together")
+    func composeCreateForceAndNoRecreateConflict() throws {
+        do {
+            _ = try ComposeCreate.parse(["--force-recreate", "--no-recreate"])
+            Issue.record("expected parse() to throw")
+        } catch {
+            let msg = String(describing: error)
+            #expect(msg.contains("--force-recreate"))
+            #expect(msg.contains("--no-recreate"))
+        }
+    }
+
     @Test("loadCompose discovers the default file inside --project-directory when -f is omitted")
     func loadComposeUsesProjectDirectoryForDefaultDiscovery() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

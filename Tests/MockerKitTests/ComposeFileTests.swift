@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import CryptoKit
 @testable import MockerKit
 
 @Suite("ComposeFile Tests")
@@ -948,5 +949,121 @@ struct ComposeFileTests {
         } catch {
             Issue.record("unexpected error type: \(error)")
         }
+    }
+
+    // MARK: - Config hash (issue #59)
+
+    @Test("ComposeService.hash returns sha256:<64 hex chars> for a fixed spec")
+    func hashReturnsSha256Literal() throws {
+        let svc = try ComposeFile.parse("""
+        services:
+          app:
+            image: nginx:alpine
+            environment:
+              FOO: bar
+        """).services["app"]!
+
+        let hash = ComposeService.hash(of: svc)
+
+        #expect(hash.hasPrefix("sha256:"))
+        #expect(hash.count == "sha256:".count + 64)
+        let hex = String(hash.dropFirst("sha256:".count))
+        #expect(hex.allSatisfy { $0.isHexDigit && !$0.isUppercase })
+    }
+
+    @Test("ComposeService.hash is stable across equivalent service specs (different field order)")
+    func hashIsDeterministicAcrossFieldOrder() throws {
+        let first = try ComposeFile.parse("""
+        services:
+          app:
+            image: nginx:alpine
+            environment:
+              FOO: bar
+              BAZ: qux
+            ports:
+              - "8080:80"
+        """).services["app"]!
+        let second = try ComposeFile.parse("""
+        services:
+          app:
+            ports:
+              - "8080:80"
+            environment:
+              BAZ: qux
+              FOO: bar
+            image: nginx:alpine
+        """).services["app"]!
+
+        #expect(ComposeService.hash(of: first) == ComposeService.hash(of: second))
+    }
+
+    @Test("ComposeService.hash ignores Docker-normalized fields (build, dependsOn)")
+    func hashIgnoresNormalizedFields() throws {
+        let withoutBuild = try ComposeFile.parse("""
+        services:
+          app:
+            image: nginx:alpine
+        """).services["app"]!
+        let withBuild = try ComposeFile.parse("""
+        services:
+          app:
+            image: nginx:alpine
+            build:
+              context: .
+              dockerfile: Dockerfile.dev
+            depends_on:
+              - db
+        """).services["app"]!
+
+        #expect(ComposeService.hash(of: withoutBuild) == ComposeService.hash(of: withBuild))
+    }
+
+    @Test("ComposeService.encode emits only hash-relevant fields (no build/dependsOn)")
+    func encodeProducesOnlyHashRelevantFields() throws {
+        let svc = try ComposeFile.parse("""
+        services:
+          app:
+            image: nginx:alpine
+            build:
+              context: .
+            depends_on:
+              - db
+        """).services["app"]!
+
+        let data = try JSONEncoder().encode(svc)
+        let json = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        #expect(json["build"] == nil)
+        #expect(json["depends_on"] == nil)
+        #expect(json["name"] as? String == "app")
+        #expect(json["image"] as? String == "nginx:alpine")
+    }
+
+    @Test("ComposeService.hash(of:) equals sha256 of JSONEncoder.encode(service) with sortedKeys")
+    func hashEqualsSHA256OfEncodedJSON() throws {
+        let svc = try ComposeFile.parse("""
+        services:
+          app:
+            image: nginx:alpine
+            environment:
+              FOO: bar
+        """).services["app"]!
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let expectedHex = SHA256.hash(data: try encoder.encode(svc))
+            .map { String(format: "%02x", $0) }.joined()
+
+        #expect(ComposeService.hash(of: svc) == "sha256:" + expectedHex)
+    }
+
+    @Test("ComposeService.hash is deterministic for the same input")
+    func hashDeterministicForSameInput() throws {
+        let svc = try ComposeFile.parse("services:\n  app:\n    image: nginx:alpine\n")
+            .services["app"]!
+        let hash = ComposeService.hash(of: svc)
+        #expect(hash.hasPrefix("sha256:"))
+        #expect(hash.count == "sha256:".count + 64)
+        #expect(ComposeService.hash(of: svc) == hash)
     }
 }
