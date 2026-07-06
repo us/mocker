@@ -5,14 +5,19 @@ import Foundation
 /// are relocated to AFTER the subcommand token, where swift-argument-parser's
 /// per-subcommand `@OptionGroup` can actually parse them.
 ///
-/// Only the compose-level global options `-f`/`--file` and `-p`/`--project-name`
-/// are relocated; everything else is left exactly where it is so the parser's
-/// normal validation and error messages are preserved. This is a pure function
-/// so it can be unit-tested without spawning the CLI.
+/// Only the compose-level global options `-f`/`--file`, `-p`/`--project-name`,
+/// and `--project-directory` are relocated; everything else is
+/// left exactly where it is so the parser's normal validation and error
+/// messages are preserved. This is a pure function so it can be unit-tested
+/// without spawning the CLI.
 enum ComposeArgNormalizer {
     /// Flags that take a separate value token and may legitimately appear before
     /// the compose subcommand (Docker places them there).
-    private static let valueFlags: Set<String> = ["-f", "--file", "-p", "--project-name"]
+    private static let valueFlags: Set<String> = [
+        "-f", "--file",
+        "-p", "--project-name",
+        "--project-directory",
+    ]
 
     static func reorder(_ args: [String]) -> [String] {
         guard args.first == "compose" else { return args }
