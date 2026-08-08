@@ -28,8 +28,24 @@ public actor VolumeManager {
         }
     }
 
+    /// Reject names that would escape the volumes directory. Every volume path is
+    /// built by interpolating the name, and a compose file can supply it verbatim
+    /// (`volumes: {data: {name: ...}}`), so `../` must never get through.
+    static func validateName(_ name: String) throws {
+        // Only path escape is rejected — anything else stays removable, including
+        // volumes created before this check existed.
+        let valid = !name.isEmpty
+            && !name.contains("/")
+            && name != "."
+            && name != ".."
+        guard valid else {
+            throw MockerError.operationFailed("invalid volume name: \(name)")
+        }
+    }
+
     /// Create a new volume.
     public func create(name: String, driver: String = "local", labels: [String: String] = [:]) throws -> VolumeInfo {
+        try Self.validateName(name)
         guard volumes[name] == nil else {
             throw MockerError.operationFailed("Volume \(name) already exists")
         }
@@ -69,6 +85,7 @@ public actor VolumeManager {
 
     /// Remove a volume.
     public func remove(_ name: String) throws -> VolumeInfo {
+        try Self.validateName(name)
         guard let vol = volumes[name] else {
             throw MockerError.volumeNotFound(name)
         }

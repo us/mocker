@@ -14,6 +14,10 @@ Mocker reads standard `docker-compose.yml` / `docker-compose.yaml` files.
 
 ```yaml
 version: "3.8"   # optional
+name: <project>  # optional, sets the project name
+
+include:         # optional, pulls in other compose files
+  - <path>
 
 services:
   <name>:
@@ -27,7 +31,26 @@ networks:
 volumes:
   <name>:
     driver: local
+    external: true      # declared elsewhere: never created or removed by mocker
+    name: <real-name>   # explicit name, used verbatim without the project prefix
 ```
+
+### include
+
+Split a project across files with the Compose `include` element, in short or long form:
+
+```yaml
+include:
+  - services/database.yml
+  - path: services/api.yml
+    project_directory: .
+    env_file: .env.api
+```
+
+Relative paths inside an included file resolve against that entry's
+`project_directory`, which defaults to the directory of the included file. Each
+included file interpolates variables from its own `env_file` (default: `.env`
+beside it). The including file's own definitions win over anything it includes.
 
 ---
 
@@ -93,7 +116,8 @@ environment:
   - API_KEY=${MY_API_KEY}
 ```
 
-Mocker loads `.env` from the same directory as the compose file. Shell environment takes priority over `.env`.
+Mocker loads `.env` from the project directory (`--project-directory`, otherwise the
+directory of the first `-f` file). Shell environment takes priority over `.env`.
 
 ---
 
@@ -142,7 +166,16 @@ Container and resource names follow Docker Compose v2 convention:
 <project>-<service>-<index>
 ```
 
-The project name defaults to the directory containing the compose file. Override with `-p`:
+The project name is resolved in this order, first match wins:
+
+1. `-p` / `--project-name`
+2. `COMPOSE_PROJECT_NAME` in the environment
+3. `COMPOSE_PROJECT_NAME` in the project directory's `.env`
+4. top-level `name:` in the compose file
+5. the project directory's name
+
+The resolved name is lowercased, and any character outside `[a-z0-9_-]` becomes a dash.
+`mocker compose config` prints the name it resolved.
 
 ```bash
 mocker compose -p staging up -d
@@ -199,7 +232,13 @@ mocker compose kill api
 
 ```bash
 mocker compose down
+
+# also remove the project's named volumes
+mocker compose down -v
 ```
+
+`-v` removes the volumes declared in the top-level `volumes:` section. Volumes marked
+`external: true` are never removed.
 
 ---
 

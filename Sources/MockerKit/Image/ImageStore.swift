@@ -45,7 +45,8 @@ actor ImageStore {
             let data = try Data(contentsOf: URL(fileURLWithPath: filePath))
             return try decoder.decode(ImageInfo.self, from: data)
         }
-        .sorted { $0.created > $1.created }
+        // Newest first; entries with an unknown timestamp sort last.
+        .sorted { ($0.created ?? .distantPast) > ($1.created ?? .distantPast) }
     }
 
     func findByReference(_ reference: String) throws -> ImageInfo? {

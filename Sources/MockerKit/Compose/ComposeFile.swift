@@ -7,15 +7,19 @@ public struct ComposeFile: Sendable {
     public var services: [String: ComposeService]
     public var networks: [String: ComposeNetwork]
     public var volumes: [String: ComposeVolume]
+    /// Top-level `name:` key — one of the project-name sources (see `resolveProjectName`).
+    public var name: String?
 
     public init(
         services: [String: ComposeService] = [:],
         networks: [String: ComposeNetwork] = [:],
-        volumes: [String: ComposeVolume] = [:]
+        volumes: [String: ComposeVolume] = [:],
+        name: String? = nil
     ) {
         self.services = services
         self.networks = networks
         self.volumes = volumes
+        self.name = name
     }
 
     /// Default compose file names searched in order, matching Docker Compose V2 behaviour.
@@ -33,9 +37,19 @@ public struct ComposeFile: Sendable {
         return cwdURL
     }
 
-    /// Normalize a directory basename to a compose project name (lowercase + spaces to dashes).
+    /// Normalize a string to a valid compose project name: lowercase, only
+    /// `[a-z0-9_-]`, and starting with an alphanumeric — the character set Docker
+    /// Compose enforces. Anything else becomes a dash.
     public static func normalizeProjectName(_ s: String) -> String {
-        s.lowercased().replacingOccurrences(of: " ", with: "-")
+        var chars = s.lowercased().map { ch -> Character in
+            ch.isASCII && (ch.isLetter || ch.isNumber || ch == "_" || ch == "-") ? ch : "-"
+        }
+        while let first = chars.first, !(first.isLetter || first.isNumber) {
+            chars.removeFirst()
+        }
+        // A name of only invalid characters leaves nothing to work with; keep the
+        // previous placeholder rather than emitting resource names starting with `-`.
+        return chars.isEmpty ? "default" : String(chars)
     }
 
     /// Return the path of the first default compose file found in `directory`.
@@ -50,6 +64,7 @@ public struct ComposeFile: Sendable {
     }
 
     /// Parse a compose file at 'path'. '.env' auto-discovery uses 'projectDir/.env'.
+    /// Top-level `include:` entries are resolved relative to the file's own directory.
     public static func load(from path: String, projectDir: URL) throws -> ComposeFile {
         let url = URL(fileURLWithPath: path)
         guard FileManager.default.fileExists(atPath: path) else {
@@ -57,26 +72,193 @@ public struct ComposeFile: Sendable {
         }
 
         let content = try String(contentsOf: url, encoding: .utf8)
-        return try parseAndSubstitute(content: content, projectDir: projectDir)
+        return try parseFile(
+            content: content,
+            fileDir: url.standardizedFileURL.deletingLastPathComponent(),
+            envFiles: [projectDir.appendingPathComponent(".env").path],
+            visited: [url.resolvingSymlinksInPath().path],
+            depth: 0
+        )
     }
 
     /// Parse a compose file from an in-memory string (stdin `-f -`).
     /// '.env' auto-discovery uses 'projectDir/.env'. Throws if content is empty.
+    /// `include:` paths resolve relative to `projectDir`, which is all the location
+    /// context a piped file has.
     public static func load(content: String, projectDir: URL) throws -> ComposeFile {
         if content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             throw MockerError.composeParseError("compose file content is empty")
         }
-        return try parseAndSubstitute(content: content, projectDir: projectDir)
+        return try parseFile(
+            content: content,
+            fileDir: projectDir,
+            envFiles: [projectDir.appendingPathComponent(".env").path],
+            visited: [],
+            depth: 0
+        )
     }
 
-    private static func parseAndSubstitute(content: String, projectDir: URL) throws -> ComposeFile {
-        let envFile = projectDir.appendingPathComponent(".env").path
-        let dotEnv = loadDotEnv(from: envFile)
+    /// Maximum `include:` nesting depth — a cheap backstop next to the cycle guard.
+    private static let maxIncludeDepth = 10
+
+    /// Parse one compose file and recursively resolve its `include:` entries.
+    ///
+    /// - `fileDir`: directory of the file being parsed; `include` paths resolve against it.
+    /// - `envFiles`: env files driving `${VAR}` interpolation for *this* file only —
+    ///   an include's env never leaks into its parent or siblings.
+    /// - `visited`: canonical paths on the current include chain, for cycle detection.
+    private static func parseFile(
+        content: String,
+        fileDir: URL,
+        envFiles: [String],
+        visited: Set<String>,
+        depth: Int
+    ) throws -> ComposeFile {
+        guard depth <= maxIncludeDepth else {
+            throw MockerError.composeParseError("include: nesting deeper than \(maxIncludeDepth) levels")
+        }
+
+        var dotEnv: [String: String] = [:]
+        for file in envFiles {
+            dotEnv.merge(loadDotEnv(from: file)) { _, new in new }
+        }
 
         // Substitute ${VAR:-default} and $VAR patterns before YAML parsing
         let substituted = substituteVariables(in: content, dotEnv: dotEnv)
+        guard let dict = try Yams.load(yaml: substituted) as? [String: Any] else {
+            throw MockerError.composeParseError("Invalid YAML structure")
+        }
+        let own = try parse(dict)
 
-        return try parse(substituted)
+        guard let includes = try parseIncludes(dict["include"]), !includes.isEmpty else {
+            return own
+        }
+
+        var included: [ComposeFile] = []
+        for entry in includes {
+            for rawPath in entry.paths {
+                let url = URL(fileURLWithPath: rawPath, relativeTo: fileDir).standardizedFileURL
+                let canonical = url.resolvingSymlinksInPath().path
+                guard !visited.contains(canonical) else {
+                    throw MockerError.composeParseError("include: cycle detected at \(url.path)")
+                }
+                guard let body = try? String(contentsOf: url, encoding: .utf8) else {
+                    throw MockerError.composeFileNotFound(url.path)
+                }
+
+                // Per the spec, an entry's project_directory defaults to the included
+                // file's own directory, and its env_file to `.env` beneath that.
+                let entryDir = entry.projectDirectory
+                    .map { URL(fileURLWithPath: $0, relativeTo: fileDir).standardizedFileURL }
+                    ?? url.deletingLastPathComponent()
+                let entryEnvFiles = entry.envFiles.isEmpty
+                    ? [entryDir.appendingPathComponent(".env").path]
+                    : entry.envFiles.map { URL(fileURLWithPath: $0, relativeTo: entryDir).path }
+
+                var model = try parseFile(
+                    content: body,
+                    fileDir: url.deletingLastPathComponent(),
+                    envFiles: entryEnvFiles,
+                    visited: visited.union([canonical]),
+                    depth: depth + 1
+                )
+                // The orchestrator only knows the top-level project directory, so an
+                // included service's relative paths are anchored to the include's own
+                // directory here instead.
+                model.anchorRelativePaths(to: entryDir)
+                // An include contributes resources, not identity: its `name:` must not
+                // become the including project's name.
+                model.name = nil
+                included.append(model)
+            }
+        }
+
+        // Parent last: its own inline definitions override anything it includes.
+        return merge(included + [own])
+    }
+
+    /// One `include:` entry, in either the short (`- path/to/file.yml`) or long
+    /// (`- {path, project_directory, env_file}`) form.
+    private struct IncludeEntry {
+        var paths: [String]
+        var projectDirectory: String?
+        var envFiles: [String]
+    }
+
+    /// Decode the top-level `include:` list. Returns nil when the key is absent.
+    /// A malformed entry is an error: silently dropping it is the very failure this
+    /// element was added to fix.
+    private static func parseIncludes(_ value: Any?) throws -> [IncludeEntry]? {
+        guard let value else { return nil }
+        guard let list = value as? [Any] else {
+            throw MockerError.composeParseError("include: must be a list of entries")
+        }
+        return try list.map { item in
+            if let path = item as? String {
+                return IncludeEntry(paths: [path], projectDirectory: nil, envFiles: [])
+            }
+            guard let dict = item as? [String: Any] else {
+                throw MockerError.composeParseError("include: entry must be a path or a mapping")
+            }
+            let paths: [String]
+            if let path = dict["path"] as? String {
+                paths = [path]
+            } else if let list = dict["path"] as? [Any] {
+                paths = list.map { "\($0)" }
+            } else {
+                throw MockerError.composeParseError("include: entry is missing a `path`")
+            }
+            guard !paths.isEmpty else {
+                throw MockerError.composeParseError("include: entry has an empty `path`")
+            }
+            let envFiles: [String]
+            if let file = dict["env_file"] as? String {
+                envFiles = [file]
+            } else if let list = dict["env_file"] as? [Any] {
+                // Entries are either a path or the long form `{path, required}`.
+                envFiles = try list.map { item in
+                    if let path = item as? String { return path }
+                    guard let path = (item as? [String: Any])?["path"] as? String else {
+                        throw MockerError.composeParseError("include: env_file entry is missing a `path`")
+                    }
+                    return path
+                }
+            } else {
+                envFiles = []
+            }
+            return IncludeEntry(
+                paths: paths,
+                projectDirectory: dict["project_directory"] as? String,
+                envFiles: envFiles
+            )
+        }
+    }
+
+    /// Rewrite every service's relative bind-mount sources and build context to
+    /// absolute paths under `dir`. Named volumes, anonymous volumes and
+    /// already-absolute paths are left untouched.
+    mutating func anchorRelativePaths(to dir: URL) {
+        for (name, service) in services {
+            services[name]?.volumes = service.volumes.map { Self.anchorVolumeSpec($0, to: dir) }
+            // `build.dockerfile` needs no anchoring of its own: it is resolved against
+            // the build context, which is absolute once this runs.
+            guard var build = service.build, !build.context.hasPrefix("/") else { continue }
+            build.context = dir.appendingPathComponent(build.context).standardized.path
+            services[name]?.build = build
+        }
+    }
+
+    /// Absolutize the source of a `source:target[:mode]` spec when it is a relative
+    /// bind mount. Mirrors the branch conditions in `ComposeOrchestrator.resolveVolumeMounts`.
+    static func anchorVolumeSpec(_ spec: String, to dir: URL) -> String {
+        let parts = spec.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2 else { return spec }  // anonymous volume: "/data"
+        let source = String(parts[0])
+        guard !source.isEmpty, !source.hasPrefix("/"), !source.hasPrefix("~"),
+              source.hasPrefix(".") || source.contains("/") else {
+            return spec  // absolute, home-relative, or a named volume
+        }
+        return dir.appendingPathComponent(source).standardized.path + ":" + String(parts[1])
     }
 
     /// Load key=value pairs from a .env file.
@@ -127,17 +309,24 @@ public struct ComposeFile: Sendable {
         return result
     }
 
-    /// Parse a docker-compose.yml string.
+    /// Parse a docker-compose.yml string. `include:` is not resolved here — it needs
+    /// the file's location, so it is handled by `load(from:projectDir:)`.
     public static func parse(_ yaml: String) throws -> ComposeFile {
         guard let dict = try Yams.load(yaml: yaml) as? [String: Any] else {
             throw MockerError.composeParseError("Invalid YAML structure")
         }
+        return try parse(dict)
+    }
 
+    private static func parse(_ dict: [String: Any]) throws -> ComposeFile {
         let services = try parseServices(dict["services"] as? [String: Any] ?? [:])
         let networks = parseNetworks(dict["networks"] as? [String: Any] ?? [:])
         let volumes = parseVolumes(dict["volumes"] as? [String: Any] ?? [:])
 
-        return ComposeFile(services: services, networks: networks, volumes: volumes)
+        return ComposeFile(
+            services: services, networks: networks, volumes: volumes,
+            name: dict["name"] as? String
+        )
     }
 
     private static func parseServices(_ dict: [String: Any]) throws -> [String: ComposeService] {
@@ -165,9 +354,15 @@ public struct ComposeFile: Sendable {
         var volumes: [String: ComposeVolume] = [:]
         for (name, value) in dict {
             let volDict = value as? [String: Any] ?? [:]
+            // `external` is either a bool or, in the legacy long form, a mapping
+            // (`external: {name: shared}`) — both mean "not owned by this project".
+            let externalDict = volDict["external"] as? [String: Any]
+            let external = volDict["external"] as? Bool ?? (volDict["external"] != nil)
             volumes[name] = ComposeVolume(
                 name: name,
-                driver: volDict["driver"] as? String ?? "local"
+                driver: volDict["driver"] as? String ?? "local",
+                external: external,
+                customName: volDict["name"] as? String ?? externalDict?["name"] as? String
             )
         }
         return volumes
@@ -209,7 +404,17 @@ public struct ComposeFile: Sendable {
         for name in requested { include(name) }
 
         let filteredServices = services.filter { included.contains($0.key) }
-        return ComposeFile(services: filteredServices, networks: networks, volumes: volumes)
+        return ComposeFile(services: filteredServices, networks: networks, volumes: volumes, name: self.name)
+    }
+
+    /// Throw `no such service: <name>` for any requested name absent from the project,
+    /// matching `docker compose`'s behaviour of erroring instead of silently doing nothing.
+    /// Only literal, user-typed names are checked — transitive dependencies are resolved
+    /// afterwards by `filtering(services:)`.
+    public func validateServiceNames(_ requested: [String]) throws {
+        for name in requested where services[name] == nil {
+            throw MockerError.operationFailed("no such service: \(name)")
+        }
     }
 
     /// Merge multiple compose files in order, matching `docker compose -f a -f b`
@@ -229,8 +434,29 @@ public struct ComposeFile: Sendable {
             }
             result.networks.merge(overlay.networks) { _, new in new }
             result.volumes.merge(overlay.volumes) { _, new in new }
+            result.name = overlay.name ?? result.name
         }
         return result
+    }
+
+    /// Resolve the effective Compose project name, matching upstream precedence:
+    /// `-p` flag → `COMPOSE_PROJECT_NAME` in the environment → `COMPOSE_PROJECT_NAME`
+    /// in `projectDir/.env` → top-level `name:` in the compose file → directory basename.
+    public static func resolveProjectName(
+        explicit: String?,
+        composeFileName: String? = nil,
+        projectDir: URL,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String {
+        let candidates = [
+            explicit,
+            environment["COMPOSE_PROJECT_NAME"],
+            loadDotEnv(from: projectDir.appendingPathComponent(".env").path)["COMPOSE_PROJECT_NAME"],
+            composeFileName,
+            projectDir.lastPathComponent,
+        ]
+        let resolved = candidates.compactMap { $0 }.first { !$0.isEmpty } ?? projectDir.lastPathComponent
+        return normalizeProjectName(resolved)
     }
 }
 
@@ -629,11 +855,26 @@ public struct ComposeNetwork: Sendable {
 
 /// Volume definition in a compose file.
 public struct ComposeVolume: Sendable {
+    /// The key this volume is declared under in the compose file.
     public var name: String
     public var driver: String
+    /// `external: true` — the volume lives outside the project lifecycle: it is
+    /// neither created by `up` nor removed by `down --volumes`.
+    public var external: Bool
+    /// Explicit `name:` override — used verbatim, without the project prefix.
+    public var customName: String?
 
-    public init(name: String, driver: String = "local") {
+    public init(name: String, driver: String = "local", external: Bool = false, customName: String? = nil) {
         self.name = name
         self.driver = driver
+        self.external = external
+        self.customName = customName
+    }
+
+    /// The volume's real name in the runtime: an explicit `name:` wins, an external
+    /// volume keeps its declared key, and everything else is project-namespaced.
+    public func runtimeName(projectName: String) -> String {
+        if let customName { return customName }
+        return external ? name : "\(projectName)-\(name)"
     }
 }

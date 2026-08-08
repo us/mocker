@@ -10,6 +10,7 @@ public enum ComposeEvent: Sendable {
     case containerStopped(String)
     case containerRemoved(String)
     case networkRemoved(String)
+    case volumeRemoved(String)
 }
 
 /// Orchestrates multi-container deployments from a compose file.
@@ -62,17 +63,16 @@ public actor ComposeOrchestrator {
             }
         }
 
-        // Create volumes
-        for (name, vol) in composeFile.volumes.sorted(by: { $0.key < $1.key }) {
-            let fullName = "\(projectName)-\(name)"
-            if (try? await volumeManager.create(name: fullName, driver: vol.driver)) != nil {
+        // Create volumes. External volumes are declared, not owned — the project
+        // must use them as they are and never create (or later remove) them.
+        for (fullName, driver) in Self.volumesToCreate(composeFile: composeFile, projectName: projectName) {
+            if (try? await volumeManager.create(name: fullName, driver: driver)) != nil {
                 events.append(.volumeCreated(fullName))
             }
         }
 
-        let prefix = "\(projectName)-"
         let observed = (try? await engine.list(all: true))?
-            .filter { $0.name.hasPrefix(prefix) }
+            .filter { Self.belongs($0, toProject: projectName) }
             .map { container -> ObservedContainer in
                 ObservedContainer(
                     name: container.name,
@@ -141,12 +141,12 @@ public actor ComposeOrchestrator {
     }
 
     /// Stop and remove all services.
-    public func down(composeFile: ComposeFile) async throws -> [ComposeEvent] {
+    /// - Parameter removeVolumes: also remove the project's named volumes (compose `down -v`).
+    public func down(composeFile: ComposeFile, removeVolumes: Bool = false) async throws -> [ComposeEvent] {
         var events: [ComposeEvent] = []
-        let containers = try await engine.list(all: true)
-        let prefix = "\(projectName)-"
+        let containers = try await ps()
 
-        for container in containers where container.name.hasPrefix(prefix) {
+        for container in containers {
             if container.state.isActive {
                 _ = try await engine.stop(container.id)
                 events.append(.containerStopped(container.name))
@@ -163,14 +163,71 @@ public actor ComposeOrchestrator {
             }
         }
 
+        if removeVolumes {
+            for fullName in Self.volumesToRemove(composeFile: composeFile, projectName: projectName) {
+                if (try? await volumeManager.remove(fullName)) != nil {
+                    events.append(.volumeRemoved(fullName))
+                }
+            }
+        }
+
         return events
+    }
+
+    /// Whether a container belongs to `service` in this project. The label written at
+    /// creation time is authoritative; containers predating it fall back to the
+    /// `<project>-<service>-<index>` naming, which is still an exact match.
+    public nonisolated static func belongs(
+        _ container: ContainerInfo,
+        to service: String,
+        projectName: String
+    ) -> Bool {
+        guard belongs(container, toProject: projectName) else { return false }
+        return container.labels["com.mocker.compose.service"] == service
+    }
+
+    /// Volumes `up` creates: the project-owned ones, under their runtime names.
+    /// The mirror image of `volumesToRemove`, so the two can never disagree.
+    public nonisolated static func volumesToCreate(
+        composeFile: ComposeFile,
+        projectName: String
+    ) -> [(name: String, driver: String)] {
+        composeFile.volumes
+            .sorted { $0.key < $1.key }
+            .filter { !$0.value.external }
+            .map { ($0.value.runtimeName(projectName: projectName), $0.value.driver) }
+    }
+
+    /// Project-owned volumes that `down --volumes` may remove: every non-`external:`
+    /// volume in the file's top-level `volumes:` section, under the name it actually
+    /// has at runtime. That is the project-prefixed name unless the file gives an
+    /// explicit `name:`, which Compose uses verbatim — an unprefixed volume shared
+    /// with another project is therefore in range, exactly as with `docker compose`.
+    /// Pure so the removal set can be unit-tested without a container backend.
+    public nonisolated static func volumesToRemove(
+        composeFile: ComposeFile,
+        projectName: String
+    ) -> [String] {
+        composeFile.volumes
+            .sorted { $0.key < $1.key }
+            .filter { !$0.value.external }
+            .map { $0.value.runtimeName(projectName: projectName) }
     }
 
     /// List services and their status.
     public func ps() async throws -> [ContainerInfo] {
         let containers = try await engine.list(all: true)
-        let prefix = "\(projectName)-"
-        return containers.filter { $0.name.hasPrefix(prefix) }
+        return containers.filter { Self.belongs($0, toProject: projectName) }
+    }
+
+    /// Whether a container belongs to this project, by the label written when compose
+    /// created it (since the first release, so every project container carries it).
+    ///
+    /// Deliberately no name-prefix fallback: `app-prod-web-1` is indistinguishable from
+    /// project `app`'s service `prod-web` by name alone, and `down`/`restart` remove what
+    /// they select — a guess there deletes another project's containers.
+    public nonisolated static func belongs(_ container: ContainerInfo, toProject projectName: String) -> Bool {
+        container.labels["com.mocker.compose.project"] == projectName
     }
 
     /// Restart a specific service or all services.
@@ -180,8 +237,9 @@ public actor ComposeOrchestrator {
         let targets: [ContainerInfo]
 
         if let service {
-            let fullName = "\(projectName)-\(service)"
-            targets = containers.filter { $0.name.hasPrefix(fullName) }
+            // Exact service match: a `hasPrefix` here also restarted `web2`/`webhook`
+            // when asked for `web`, and restart stops and REMOVES what it selects.
+            targets = containers.filter { Self.belongs($0, to: service, projectName: projectName) }
         } else {
             targets = containers
         }
@@ -277,7 +335,8 @@ public actor ComposeOrchestrator {
             // Skip the rebuild only when `--build` wasn't requested and the image exists.
             var shouldBuild = forceBuild
             if !shouldBuild {
-                let existingImages = try await imageManager.list()
+                // Only repository and tag are compared here, so skip the per-image metadata reads.
+                let existingImages = try await imageManager.list(enrich: false)
                 shouldBuild = !existingImages.contains { ComposeService.imageMatches($0, tag: tag) }
             }
             if shouldBuild {
@@ -299,7 +358,8 @@ public actor ComposeOrchestrator {
             break
         }
 
-        let imageName = service.image ?? "\(projectName)-\(service.name):latest"
+        // Same helper the build path tags with, so run and build never disagree.
+        let imageName = service.buildTag(projectName: projectName)
 
         // Parse port mappings
         let ports = try service.ports.map { try PortMapping.parse($0) }

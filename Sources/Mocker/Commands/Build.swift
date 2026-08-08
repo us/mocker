@@ -133,10 +133,13 @@ struct Build: AsyncParsableCommand {
             labels: label, quiet: quiet, progress: progress, output: output,
             builder: builder
         )
+        // The build can succeed while the image is not readable from our store; report
+        // the tag rather than an empty ID in that case.
+        let identifier = image.id.isEmpty ? tag : image.shortID
         if quiet {
-            print(image.shortID)
+            print(identifier)
         } else {
-            print("Successfully built \(image.shortID)")
+            print("Successfully built \(identifier)")
             print("Successfully tagged \(tag)")
         }
     }

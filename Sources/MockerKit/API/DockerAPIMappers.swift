@@ -46,9 +46,11 @@ public func mapToImageListItem(_ i: ImageInfo) -> [String: Any] {
         "ParentId": "",
         "RepoTags": ["\(repo):\(tag)"],
         "RepoDigests": [Any](),
-        "Created": Int(i.created.timeIntervalSince1970),
-        "Size": Int(i.size),
-        "VirtualSize": Int(i.size),
+        // The Engine API types these as concrete integers, so an unknown value is
+        // reported as 0 here even though the CLI renders it as `N/A`.
+        "Created": Int(i.created?.timeIntervalSince1970 ?? 0),
+        "Size": Int(i.size ?? 0),
+        "VirtualSize": Int(i.size ?? 0),
         "SharedSize": -1,
         "Containers": -1,
         "Labels": i.labels,

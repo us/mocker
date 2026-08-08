@@ -503,9 +503,15 @@ mocker volume inspect VOLUME
 All compose subcommands share these options:
 
 ```
--f, --file           Compose file path (default: docker-compose.yml)
--p, --project-name   Project name (default: directory name)
+-f, --file             Compose file path (default: docker-compose.yml)
+-p, --project-name     Project name (see resolution order below)
+    --project-directory Working directory for relative paths and `.env`
+    --dry-run          Print what would happen and change nothing
 ```
+
+The project name is resolved as `-p` → `COMPOSE_PROJECT_NAME` in the environment →
+`COMPOSE_PROJECT_NAME` in `.env` → top-level `name:` in the compose file → the project
+directory's name.
 
 ### `mocker compose up`
 
@@ -537,14 +543,23 @@ Services start in dependency order (`depends_on`). Networks and volumes are crea
 Stop and remove containers and networks.
 
 ```bash
-mocker compose [OPTIONS] down
+mocker compose [OPTIONS] down [--volumes]
+```
+
+**Flags:**
+```
+-v, --volumes   Also remove the project's named volumes
 ```
 
 **Examples:**
 ```bash
 mocker compose down
+mocker compose down --volumes
 mocker compose -f staging.yml down
 ```
+
+`--volumes` removes the volumes declared in the file's top-level `volumes:` section.
+Volumes marked `external: true` are never removed.
 
 ---
 

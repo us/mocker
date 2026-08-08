@@ -492,7 +492,8 @@ mocker build [OPTIONS] PATH
 
 ### `mocker images`
 
-List images.
+List images. `SIZE` and `CREATED` are read from each image's manifest and config, and
+render as `N/A` when that metadata is not present in the local content store.
 
 ```
 mocker images [OPTIONS]
@@ -892,12 +893,18 @@ mocker system prune [OPTIONS]
 
 ## Compose
 
-All compose subcommands support these shared flags:
+All compose subcommands support these shared flags, before or after the subcommand:
 
 | Flag | Short | Description |
 |------|-------|-------------|
 | `--file` | `-f` | Compose file path |
 | `--project-name` | `-p` | Project name |
+| `--project-directory` | | Working directory for relative paths and `.env` |
+| `--dry-run` | | Print the actions that would be taken and change nothing |
+
+The project name is resolved as `-p` → `COMPOSE_PROJECT_NAME` in the environment →
+`COMPOSE_PROJECT_NAME` in `.env` → top-level `name:` in the compose file → the project
+directory's name.
 
 ### `mocker compose up`
 
@@ -998,7 +1005,8 @@ mocker compose logs [OPTIONS] [SERVICE]
 
 ### `mocker compose build`
 
-Build or rebuild services.
+Build or rebuild services. Each image is tagged with the service's `image:` when set,
+otherwise `<project>-<service>:latest`.
 
 ```
 mocker compose build [OPTIONS] [SERVICE...]

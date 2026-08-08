@@ -33,7 +33,7 @@ struct SystemInfo: AsyncParsableCommand {
         let running = containers.filter { $0.state == .running }.count
         let paused = containers.filter { $0.state == .paused }.count
         let stopped = containers.count - running - paused
-        let images = try await imageManager.list()
+        let images = try await imageManager.list(enrich: false)
 
         let info = ProcessInfo.processInfo
 
@@ -146,7 +146,7 @@ struct SystemDf: AsyncParsableCommand {
         let volumeManager = try VolumeManager(config: config)
 
         let containers = try await engine.list(all: true)
-        let images = try await imageManager.list()
+        let images = try await imageManager.list(enrich: false)
         let volumes = await volumeManager.list()
 
         let headers = ["TYPE", "TOTAL", "ACTIVE", "SIZE", "RECLAIMABLE"]
