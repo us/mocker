@@ -6,8 +6,8 @@ import Foundation
 /// per-subcommand `@OptionGroup` can actually parse them.
 ///
 /// Only the compose-level global options `-f`/`--file`, `-p`/`--project-name`,
-/// and `--project-directory` are relocated; everything else is
-/// left exactly where it is so the parser's normal validation and error
+/// `--project-directory` and the valueless `--dry-run` are relocated; everything
+/// else is left exactly where it is so the parser's normal validation and error
 /// messages are preserved. This is a pure function so it can be unit-tested
 /// without spawning the CLI.
 enum ComposeArgNormalizer {
@@ -18,6 +18,9 @@ enum ComposeArgNormalizer {
         "-p", "--project-name",
         "--project-directory",
     ]
+
+    /// Valueless global flags Docker also accepts before the subcommand.
+    private static let boolFlags: Set<String> = ["--dry-run"]
 
     static func reorder(_ args: [String]) -> [String] {
         guard args.first == "compose" else { return args }
@@ -39,6 +42,12 @@ enum ComposeArgNormalizer {
             // Equals-form (`--file=a.yaml` / `-f=a.yaml`): relocate as a single token.
             if let eq = token.firstIndex(of: "="),
                valueFlags.contains(String(token[token.startIndex..<eq])) {
+                relocated.append(token)
+                index += 1
+                continue
+            }
+
+            if boolFlags.contains(token) {
                 relocated.append(token)
                 index += 1
                 continue

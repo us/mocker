@@ -59,6 +59,11 @@ struct ComposeOptions: ParsableArguments {
     @Option(name: .customLong("project-directory"), help: "Specify an alternate working directory")
     var projectDirectory: String?
 
+    /// Declared once here rather than per subcommand: every compose subcommand accepts
+    /// `--dry-run`, and each mutating one returns early instead of touching the runtime.
+    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
+    var dryRun = false
+
     func loadCompose() throws -> (ComposeFile, projectName: String, projectDir: URL) {
         let cwd = FileManager.default.currentDirectoryPath
         let projectDir = ComposeFile.resolveProjectDirectory(
@@ -86,9 +91,26 @@ struct ComposeOptions: ParsableArguments {
         }
         let composeFile = ComposeFile.merge(loaded)
 
-        let project = projectName ?? ComposeFile.normalizeProjectName(projectDir.lastPathComponent)
+        let project = ComposeFile.resolveProjectName(
+            explicit: projectName,
+            composeFileName: composeFile.name,
+            projectDir: projectDir
+        )
 
         return (composeFile, project, projectDir)
+    }
+}
+
+// MARK: - Dry Run
+
+enum ComposeDryRun {
+    /// Report what a mutating subcommand would have done and change nothing, matching
+    /// `docker compose --dry-run`'s contract that no state is touched.
+    static func report(_ action: String, targets: [String]) {
+        print("DRY-RUN MODE - no changes will be made")
+        for target in targets {
+            print("DRY-RUN MODE - \(action): \(target)")
+        }
     }
 }
 
@@ -113,6 +135,7 @@ enum ComposeFormatter {
         case .containerStopped(let name): ("Container \(name)", "Stopped")
         case .containerRemoved(let name): ("Container \(name)", "Removed")
         case .networkRemoved(let name): ("Network \(name)", "Removed")
+        case .volumeRemoved(let name): ("Volume \(name)", "Removed")
         }
     }
 }
@@ -147,9 +170,6 @@ struct ComposeUp: AsyncParsableCommand {
 
     @Flag(name: .long, help: "Build images before starting containers")
     var build = false
-
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
 
     @Option(name: .customLong("exit-code-from"), help: "Return the exit code of the selected service container")
     var exitCodeFrom: String?
@@ -229,12 +249,20 @@ struct ComposeUp: AsyncParsableCommand {
     func run() async throws {
         var (composeFile, project, projectDir) = try options.loadCompose()
         let config = MockerConfig()
-        try config.ensureDirectories()
 
         // Filter to requested services only
         if !services.isEmpty {
+            try composeFile.validateServiceNames(services)
             composeFile = composeFile.filtering(services: services)
         }
+
+        // Guard before `ensureDirectories`: a dry run must not write anything at all.
+        if options.dryRun {
+            ComposeDryRun.report("up", targets: composeFile.serviceOrder().map { "\(project)-\($0)-1" })
+            return
+        }
+
+        try config.ensureDirectories()
 
         let engine = try ContainerEngine(config: config)
         let imageManager = try ImageManager(config: config)
@@ -250,7 +278,6 @@ struct ComposeUp: AsyncParsableCommand {
             volumeManager: volumeManager
         )
 
-        let totalResources = composeFile.networks.count + composeFile.volumes.count + composeFile.services.count
         let events = try await orchestrator.up(
             composeFile: composeFile,
             detach: detach,
@@ -259,7 +286,9 @@ struct ComposeUp: AsyncParsableCommand {
             forceRecreate: forceRecreate,
             noRecreate: noRecreate
         )
-        ComposeFormatter.printEvents(events, total: totalResources)
+        // Total is the work actually performed, matching `down`: counting declared
+        // resources instead reported `1/2` whenever a volume already existed.
+        ComposeFormatter.printEvents(events, total: events.count)
     }
 }
 
@@ -280,15 +309,21 @@ struct ComposeDown: AsyncParsableCommand {
     @Option(name: .shortAndLong, help: "Timeout in seconds for stopping containers")
     var timeout: Int = 10
 
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
-
     @Option(name: .long, help: "Remove images used by services (all|local)")
     var rmi: String?
 
     func run() async throws {
         let (composeFile, project, projectDir) = try options.loadCompose()
         let config = MockerConfig()
+
+        if options.dryRun {
+            var targets = composeFile.services.keys.sorted().map { "\(project)-\($0)-1" }
+            if volumes {
+                targets += ComposeOrchestrator.volumesToRemove(composeFile: composeFile, projectName: project)
+            }
+            ComposeDryRun.report("down", targets: targets)
+            return
+        }
 
         let engine = try ContainerEngine(config: config)
         let imageManager = try ImageManager(config: config)
@@ -304,7 +339,7 @@ struct ComposeDown: AsyncParsableCommand {
             volumeManager: volumeManager
         )
 
-        let events = try await orchestrator.down(composeFile: composeFile)
+        let events = try await orchestrator.down(composeFile: composeFile, removeVolumes: volumes)
         let totalResources = events.count
         ComposeFormatter.printEvents(events, total: totalResources)
     }
@@ -320,9 +355,6 @@ struct ComposePS: AsyncParsableCommand {
 
     @Flag(name: .shortAndLong, help: "Show all stopped containers")
     var all = false
-
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
 
     @Option(name: .long, parsing: .singleValue, help: "Filter services by a property")
     var filter: [String] = []
@@ -349,8 +381,9 @@ struct ComposePS: AsyncParsableCommand {
     var services: [String] = []
 
     func run() async throws {
-        let (_, project, projectDir) = try options.loadCompose()
+        let (composeFile, project, projectDir) = try options.loadCompose()
         let config = MockerConfig()
+        try composeFile.validateServiceNames(services)
 
         let engine = try ContainerEngine(config: config)
         let imageManager = try ImageManager(config: config)
@@ -370,8 +403,7 @@ struct ComposePS: AsyncParsableCommand {
 
         if !services.isEmpty {
             containers = containers.filter { c in
-                let svc = c.labels["com.mocker.compose.service"] ?? ""
-                return services.contains(svc)
+                services.contains { ComposeOrchestrator.belongs(c, to: $0, projectName: project) }
             }
         }
 
@@ -419,9 +451,6 @@ struct ComposeLogs: AsyncParsableCommand {
     @Flag(name: .long, help: "Follow log output")
     var follow = false
 
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
-
     @Option(name: .long, help: "Show logs for a specific container index")
     var index: Int?
 
@@ -444,8 +473,9 @@ struct ComposeLogs: AsyncParsableCommand {
     var until: String?
 
     func run() async throws {
-        let (_, project, projectDir) = try options.loadCompose()
+        let (composeFile, project, projectDir) = try options.loadCompose()
         let config = MockerConfig()
+        if let service { try composeFile.validateServiceNames([service]) }
         let engine = try ContainerEngine(config: config)
         let imageManager = try ImageManager(config: config)
         let networkManager = try NetworkManager(config: config)
@@ -463,7 +493,7 @@ struct ComposeLogs: AsyncParsableCommand {
         let containers = try await orchestrator.ps()
         let targets: [ContainerInfo]
         if let service {
-            targets = containers.filter { $0.name.contains(service) }
+            targets = containers.filter { ComposeOrchestrator.belongs($0, to: service, projectName: project) }
         } else {
             targets = containers
         }
@@ -488,9 +518,6 @@ struct ComposeKill: AsyncParsableCommand {
     @Argument(help: "Service name (kills all if omitted)")
     var service: String?
 
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
-
     @Flag(name: .customLong("remove-orphans"), help: "Remove containers for services not defined in the Compose file")
     var removeOrphans = false
 
@@ -498,8 +525,16 @@ struct ComposeKill: AsyncParsableCommand {
     var signal: String?
 
     func run() async throws {
-        let (_, project, projectDir) = try options.loadCompose()
+        let (composeFile, project, projectDir) = try options.loadCompose()
         let config = MockerConfig()
+        if let service { try composeFile.validateServiceNames([service]) }
+
+        if options.dryRun {
+            let names = service.map { [$0] } ?? composeFile.services.keys.sorted()
+            ComposeDryRun.report("kill", targets: names.map { "\(project)-\($0)-1" })
+            return
+        }
+
         let engine = try ContainerEngine(config: config)
         let imageManager = try ImageManager(config: config)
         let networkManager = try NetworkManager(config: config)
@@ -515,7 +550,7 @@ struct ComposeKill: AsyncParsableCommand {
         )
 
         let containers = try await orchestrator.ps()
-        let targets = service.map { s in containers.filter { $0.name.contains(s) } } ?? containers
+        let targets = service.map { s in containers.filter { ComposeOrchestrator.belongs($0, to: s, projectName: project) } } ?? containers
         for c in targets {
             try? await engine.stop(c.id)
             print(c.name)
@@ -534,9 +569,6 @@ struct ComposeRestart: AsyncParsableCommand {
     @Argument(help: "Service name (restarts all if omitted)")
     var service: String?
 
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
-
     @Flag(name: .customLong("no-deps"), help: "Don't restart dependent services")
     var noDeps = false
 
@@ -546,6 +578,13 @@ struct ComposeRestart: AsyncParsableCommand {
     func run() async throws {
         let (composeFile, project, projectDir) = try options.loadCompose()
         let config = MockerConfig()
+        if let service { try composeFile.validateServiceNames([service]) }
+
+        if options.dryRun {
+            let names = service.map { [$0] } ?? composeFile.serviceOrder()
+            ComposeDryRun.report("restart", targets: names.map { "\(project)-\($0)-1" })
+            return
+        }
 
         let engine = try ContainerEngine(config: config)
         let imageManager = try ImageManager(config: config)
@@ -594,9 +633,6 @@ struct ComposeBuildCommand: AsyncParsableCommand {
     @Flag(name: .long, help: "Check build configuration and exit")
     var check = false
 
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
-
     @Option(name: .shortAndLong, help: "Set memory limit for the build container")
     var memory: String?
 
@@ -622,17 +658,20 @@ struct ComposeBuildCommand: AsyncParsableCommand {
     var services: [String] = []
 
     func run() async throws {
-        let (composeFile, _, projectDir) = try options.loadCompose()
+        let (composeFile, project, projectDir) = try options.loadCompose()
         let config = MockerConfig()
+        try composeFile.validateServiceNames(services)
+
+        let plan = Self.buildPlan(composeFile: composeFile, project: project, services: services)
+
+        if options.dryRun {
+            ComposeDryRun.report("build", targets: plan.map(\.tag))
+            return
+        }
+
         let manager = try ImageManager(config: config)
-
-        let servicesToBuild = services.isEmpty
-            ? composeFile.services.filter { $0.value.build != nil }
-            : composeFile.services.filter { services.contains($0.key) && $0.value.build != nil }
-
-        for (name, service) in servicesToBuild {
+        for (name, service, tag) in plan {
             guard let buildConfig = service.build else { continue }
-            let tag = service.image ?? "\(name):latest"
             if !quiet { print("Building \(name)...") }
             let absContext = ImageManager.resolveContextPath(context: buildConfig.context, cwd: projectDir.path)
             let dockerfilePath = ImageManager.composeDockerfilePath(
@@ -648,6 +687,23 @@ struct ComposeBuildCommand: AsyncParsableCommand {
             )
             if !quiet { print("Successfully built \(name)") }
         }
+    }
+
+    /// Services with a `build:` section and the tag each one is built under.
+    ///
+    /// The tag must be `ComposeService.buildTag` — the same value the runtime looks up
+    /// when starting the service. Computing it here as a bare `<service>:latest` made
+    /// builds self-referential: a Dockerfile saying `FROM caddy:latest` then resolved to
+    /// mocker's own previous build instead of the official base image.
+    static func buildPlan(
+        composeFile: ComposeFile,
+        project: String,
+        services: [String]
+    ) -> [(name: String, service: ComposeService, tag: String)] {
+        composeFile.services
+            .filter { $0.value.build != nil && (services.isEmpty || services.contains($0.key)) }
+            .sorted { $0.key < $1.key }
+            .map { ($0.key, $0.value, $0.value.buildTag(projectName: project)) }
     }
 }
 
@@ -667,9 +723,6 @@ struct ComposePull: AsyncParsableCommand {
     @Flag(name: .customLong("ignore-pull-failures"), help: "Pull what it can and ignores images with pull failures")
     var ignorePullFailures = false
 
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
-
     @Flag(name: .customLong("ignore-buildable"), help: "Ignore images that can be built")
     var ignoreBuildable = false
 
@@ -685,11 +738,18 @@ struct ComposePull: AsyncParsableCommand {
     func run() async throws {
         let (composeFile, _, _) = try options.loadCompose()
         let config = MockerConfig()
-        let manager = try ImageManager(config: config)
+        try composeFile.validateServiceNames(services)
 
         let servicesToPull = services.isEmpty
             ? composeFile.services
             : composeFile.services.filter { services.contains($0.key) }
+
+        if options.dryRun {
+            ComposeDryRun.report("pull", targets: servicesToPull.values.compactMap(\.image).sorted())
+            return
+        }
+
+        let manager = try ImageManager(config: config)
 
         for (name, service) in servicesToPull {
             guard let image = service.image else { continue }
@@ -721,9 +781,6 @@ struct ComposePush: AsyncParsableCommand {
     @Flag(name: .customLong("ignore-push-failures"), help: "Push what it can and ignores images with push failures")
     var ignorePushFailures = false
 
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
-
     @Flag(name: .customLong("include-deps"), help: "Also push images of services declared as dependencies")
     var includeDeps = false
 
@@ -736,11 +793,18 @@ struct ComposePush: AsyncParsableCommand {
     func run() async throws {
         let (composeFile, _, _) = try options.loadCompose()
         let config = MockerConfig()
-        let manager = try ImageManager(config: config)
+        try composeFile.validateServiceNames(services)
 
         let servicesToPush = services.isEmpty
             ? composeFile.services
             : composeFile.services.filter { services.contains($0.key) }
+
+        if options.dryRun {
+            ComposeDryRun.report("push", targets: servicesToPush.values.compactMap(\.image).sorted())
+            return
+        }
+
+        let manager = try ImageManager(config: config)
 
         for (name, service) in servicesToPush {
             guard let image = service.image else { continue }
@@ -797,9 +861,6 @@ struct ComposeExec: AsyncParsableCommand {
     @Option(name: .long, help: "Index of the container if service is scaled")
     var index: Int = 1
 
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
-
     @Flag(name: [.customShort("T"), .customLong("no-tty")], help: "Disable pseudo-TTY allocation")
     var noTty = false
 
@@ -813,11 +874,17 @@ struct ComposeExec: AsyncParsableCommand {
     }
 
     func run() async throws {
-        let (_, project, _) = try options.loadCompose()
+        let (composeFile, project, _) = try options.loadCompose()
         let config = MockerConfig()
-        let engine = try ContainerEngine(config: config)
+        try composeFile.validateServiceNames([service])
 
         let containerName = "\(project)-\(service)-\(index)"
+        if options.dryRun {
+            ComposeDryRun.report("exec", targets: [containerName])
+            return
+        }
+
+        let engine = try ContainerEngine(config: config)
         try await engine.exec(containerName, command: command, interactive: interactive, tty: tty)
     }
 }
@@ -875,9 +942,6 @@ struct ComposeRun: AsyncParsableCommand {
     @Option(name: .customLong("cap-drop"), parsing: .singleValue, help: "Drop Linux capabilities")
     var capDrop: [String] = []
 
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
-
     @Option(name: .customLong("env-from-file"), parsing: .singleValue, help: "Set environment variables from file")
     var envFromFile: [String] = []
 
@@ -929,7 +993,6 @@ struct ComposeRun: AsyncParsableCommand {
     func run() async throws {
         let (composeFile, _, _) = try options.loadCompose()
         let config = MockerConfig()
-        let engine = try ContainerEngine(config: config)
 
         guard let svc = composeFile.services[service] else {
             throw MockerError.operationFailed("no such service: \(service)")
@@ -938,6 +1001,13 @@ struct ComposeRun: AsyncParsableCommand {
         guard let image = svc.image else {
             throw MockerError.operationFailed("service \(service) has no image")
         }
+
+        if options.dryRun {
+            ComposeDryRun.report("run", targets: [image])
+            return
+        }
+
+        let engine = try ContainerEngine(config: config)
 
         var environment: [String: String] = [:]
         for item in env {
@@ -981,15 +1051,19 @@ struct ComposeStop: AsyncParsableCommand {
     @Option(name: .shortAndLong, help: "Specify a shutdown timeout in seconds")
     var timeout: Int = 10
 
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
-
     @Argument(help: "Services to stop (stops all if omitted)")
     var services: [String] = []
 
     func run() async throws {
-        let (_, project, projectDir) = try options.loadCompose()
+        let (composeFile, project, projectDir) = try options.loadCompose()
         let config = MockerConfig()
+        try composeFile.validateServiceNames(services)
+
+        if options.dryRun {
+            ComposeDryRun.report("stop", targets: Self.dryRunTargets(composeFile, project, services))
+            return
+        }
+
         let engine = try ContainerEngine(config: config)
         let imageManager = try ImageManager(config: config)
         let networkManager = try NetworkManager(config: config)
@@ -1007,12 +1081,19 @@ struct ComposeStop: AsyncParsableCommand {
         let containers = try await orchestrator.ps()
         let targets = services.isEmpty
             ? containers
-            : containers.filter { c in services.contains(where: { c.name.contains($0) }) }
+            : containers.filter { c in services.contains { ComposeOrchestrator.belongs(c, to: $0, projectName: project) } }
 
         for c in targets {
             _ = try? await engine.stop(c.id)
             print("Container \(c.name)  Stopped")
         }
+    }
+
+    /// Container names a service-scoped subcommand would act on. Shared by the
+    /// `--dry-run` branches of stop/start/rm, which select the same way.
+    static func dryRunTargets(_ composeFile: ComposeFile, _ project: String, _ services: [String]) -> [String] {
+        let names = services.isEmpty ? composeFile.services.keys.sorted() : services.sorted()
+        return names.map { "\(project)-\($0)-1" }
     }
 }
 
@@ -1026,9 +1107,6 @@ struct ComposeStart: AsyncParsableCommand {
 
     @OptionGroup var options: ComposeOptions
 
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
-
     @Flag(name: .long, help: "Wait for services to be running|healthy")
     var wait = false
 
@@ -1039,8 +1117,15 @@ struct ComposeStart: AsyncParsableCommand {
     var services: [String] = []
 
     func run() async throws {
-        let (_, project, projectDir) = try options.loadCompose()
+        let (composeFile, project, projectDir) = try options.loadCompose()
         let config = MockerConfig()
+        try composeFile.validateServiceNames(services)
+
+        if options.dryRun {
+            ComposeDryRun.report("start", targets: ComposeStop.dryRunTargets(composeFile, project, services))
+            return
+        }
+
         let engine = try ContainerEngine(config: config)
         let imageManager = try ImageManager(config: config)
         let networkManager = try NetworkManager(config: config)
@@ -1058,7 +1143,7 @@ struct ComposeStart: AsyncParsableCommand {
         let containers = try await orchestrator.ps()
         let targets = services.isEmpty
             ? containers
-            : containers.filter { c in services.contains(where: { c.name.contains($0) }) }
+            : containers.filter { c in services.contains { ComposeOrchestrator.belongs(c, to: $0, projectName: project) } }
 
         for c in targets {
             _ = try? await engine.start(c.id)
@@ -1086,15 +1171,19 @@ struct ComposeRm: AsyncParsableCommand {
     @Flag(name: [.customShort("v"), .long], help: "Remove any anonymous volumes attached to containers")
     var volumes = false
 
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
-
     @Argument(help: "Services to remove (removes all if omitted)")
     var services: [String] = []
 
     func run() async throws {
-        let (_, project, projectDir) = try options.loadCompose()
+        let (composeFile, project, projectDir) = try options.loadCompose()
         let config = MockerConfig()
+        try composeFile.validateServiceNames(services)
+
+        if options.dryRun {
+            ComposeDryRun.report("rm", targets: ComposeStop.dryRunTargets(composeFile, project, services))
+            return
+        }
+
         let engine = try ContainerEngine(config: config)
         let imageManager = try ImageManager(config: config)
         let networkManager = try NetworkManager(config: config)
@@ -1112,7 +1201,7 @@ struct ComposeRm: AsyncParsableCommand {
         let containers = try await orchestrator.ps()
         let targets = services.isEmpty
             ? containers
-            : containers.filter { c in services.contains(where: { c.name.contains($0) }) }
+            : containers.filter { c in services.contains { ComposeOrchestrator.belongs(c, to: $0, projectName: project) } }
 
         for c in targets {
             if stopBeforeRemove { _ = try? await engine.stop(c.id) }
@@ -1140,9 +1229,6 @@ struct ComposeConfig: AsyncParsableCommand {
 
     @Flag(name: .shortAndLong, help: "Only validate the configuration, don't print anything")
     var quiet = false
-
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
 
     @Flag(name: .long, help: "Print the environment variables")
     var environment = false
@@ -1193,7 +1279,7 @@ struct ComposeConfig: AsyncParsableCommand {
     var variables = false
 
     func run() async throws {
-        let (composeFile, _, _) = try options.loadCompose()
+        let (composeFile, project, _) = try options.loadCompose()
 
         if quiet { return }
 
@@ -1211,7 +1297,7 @@ struct ComposeConfig: AsyncParsableCommand {
             return
         }
 
-        print(Self.renderConfig(composeFile: composeFile, projectName: options.projectName))
+        print(Self.renderConfig(composeFile: composeFile, projectName: project))
     }
 
     /// Render the resolved Compose file as YAML-like output, mirroring what `up`
@@ -1222,21 +1308,54 @@ struct ComposeConfig: AsyncParsableCommand {
     /// are wired into the container's `-m`/`-c` flags by `ComposeOrchestrator.
     /// startService` — this must surface them too, or `config` misleadingly implies
     /// they're dropped (see #62).
-    static func renderConfig(composeFile: ComposeFile, projectName: String?) -> String {
+    /// Quote a whole scalar when leaving it bare would change how YAML reads it — a `#`
+    /// starts a comment, a `:` splits a mapping, and surrounding spaces are stripped.
+    /// Must be applied to the entire scalar: quoting only the tail of `KEY=value` still
+    /// leaves the `#` outside the quotes and the rest of the line commented out.
+    static func yamlScalar(_ value: String) -> String {
+        let needsQuoting = value.contains("#") || value.contains(":")
+            || value != value.trimmingCharacters(in: .whitespaces)
+            || value.isEmpty
+        guard needsQuoting else { return value }
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
+    }
+
+    static func renderConfig(composeFile: ComposeFile, projectName: String) -> String {
         var lines: [String] = []
-        lines.append("name: \(projectName ?? "default")")
+        // Non-optional on purpose: this printed a literal `default` for years because the
+        // resolved name was available at the call site and simply not passed in.
+        lines.append("name: \(projectName)")
         lines.append("services:")
         for (name, svc) in composeFile.services.sorted(by: { $0.key < $1.key }) {
             lines.append("  \(name):")
             if let image = svc.image { lines.append("    image: \(image)") }
-            if let build = svc.build { lines.append("    build: \(build)") }
+            if let build = svc.build {
+                // Rendered as the Compose long form; interpolating the struct printed
+                // Swift's own description (`ComposeBuild(context: "...", ...)`).
+                lines.append("    build:")
+                lines.append("      context: \(build.context)")
+                if let dockerfile = build.dockerfile { lines.append("      dockerfile: \(dockerfile)") }
+                if let target = build.target { lines.append("      target: \(target)") }
+                if !build.args.isEmpty {
+                    lines.append("      args:")
+                    build.args.sorted { $0.key < $1.key }.forEach {
+                        lines.append("        \($0.key): \(yamlScalar($0.value))")
+                    }
+                }
+            }
             if !svc.ports.isEmpty {
                 lines.append("    ports:")
                 svc.ports.forEach { lines.append("      - \($0)") }
             }
             if !svc.environment.isEmpty {
                 lines.append("    environment:")
-                svc.environment.forEach { lines.append("      - \($0)") }
+                // Interpolating the pair printed Swift's tuple syntax, `(key: "FOO", value: "bar")`.
+                svc.environment.sorted { $0.key < $1.key }.forEach {
+                    lines.append("      - \(yamlScalar("\($0.key)=\($0.value)"))")
+                }
             }
             if svc.memLimit != nil || svc.cpus != nil || svc.memReservation != nil || svc.cpusReservation != nil {
                 lines.append("    deploy:")
@@ -1269,9 +1388,6 @@ struct ComposeCreate: AsyncParsableCommand {
 
     @Flag(name: .long, help: "Build images before starting containers")
     var build = false
-
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
 
     @Flag(name: .customLong("force-recreate"), help: "Recreate containers even if configuration hasn't changed")
     var forceRecreate = false
@@ -1310,11 +1426,19 @@ struct ComposeCreate: AsyncParsableCommand {
         // create is essentially up without starting — for now delegate to up
         var (composeFile, project, projectDir) = try options.loadCompose()
         let config = MockerConfig()
-        try config.ensureDirectories()
 
         if !services.isEmpty {
+            try composeFile.validateServiceNames(services)
             composeFile = composeFile.filtering(services: services)
         }
+
+        // Guard before `ensureDirectories`: a dry run must not write anything at all.
+        if options.dryRun {
+            ComposeDryRun.report("create", targets: composeFile.serviceOrder().map { "\(project)-\($0)-1" })
+            return
+        }
+
+        try config.ensureDirectories()
 
         let engine = try ContainerEngine(config: config)
         let imageManager = try ImageManager(config: config)
@@ -1351,9 +1475,6 @@ struct ComposeImages: AsyncParsableCommand {
     )
 
     @OptionGroup var options: ComposeOptions
-
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
 
     @Option(name: .long, help: "Format the output (table|json)")
     var format: String?
@@ -1400,15 +1521,13 @@ struct ComposeTop: AsyncParsableCommand {
 
     @OptionGroup var options: ComposeOptions
 
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
-
     @Argument(help: "Services to show (shows all if omitted)")
     var services: [String] = []
 
     func run() async throws {
-        let (_, project, projectDir) = try options.loadCompose()
+        let (composeFile, project, projectDir) = try options.loadCompose()
         let config = MockerConfig()
+        try composeFile.validateServiceNames(services)
         let engine = try ContainerEngine(config: config)
         let imageManager = try ImageManager(config: config)
         let networkManager = try NetworkManager(config: config)
@@ -1426,7 +1545,7 @@ struct ComposeTop: AsyncParsableCommand {
         let containers = try await orchestrator.ps()
         let targets = services.isEmpty
             ? containers
-            : containers.filter { c in services.contains(where: { c.name.contains($0) }) }
+            : containers.filter { c in services.contains { ComposeOrchestrator.belongs(c, to: $0, projectName: project) } }
 
         for c in targets {
             print("\(c.name)")
@@ -1459,15 +1578,13 @@ struct ComposePort: AsyncParsableCommand {
     @Option(name: .long, help: "Index of the container if service is scaled")
     var index: Int = 1
 
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
-
     @Option(name: .long, help: "Protocol (tcp or udp)")
     var `protocol`: String?
 
     func run() async throws {
-        let (_, project, _) = try options.loadCompose()
+        let (composeFile, project, _) = try options.loadCompose()
         let config = MockerConfig()
+        try composeFile.validateServiceNames([service])
         let engine = try ContainerEngine(config: config)
 
         let containerName = "\(project)-\(service)-\(index)"
@@ -1488,15 +1605,19 @@ struct ComposePause: AsyncParsableCommand {
 
     @OptionGroup var options: ComposeOptions
 
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
-
     @Argument(help: "Services to pause (pauses all if omitted)")
     var services: [String] = []
 
     func run() async throws {
-        let (_, project, projectDir) = try options.loadCompose()
+        let (composeFile, project, projectDir) = try options.loadCompose()
         let config = MockerConfig()
+        try composeFile.validateServiceNames(services)
+
+        if options.dryRun {
+            ComposeDryRun.report("pause", targets: ComposeStop.dryRunTargets(composeFile, project, services))
+            return
+        }
+
         let engine = try ContainerEngine(config: config)
         let imageManager = try ImageManager(config: config)
         let networkManager = try NetworkManager(config: config)
@@ -1514,7 +1635,7 @@ struct ComposePause: AsyncParsableCommand {
         let containers = try await orchestrator.ps()
         let targets = services.isEmpty
             ? containers
-            : containers.filter { c in services.contains(where: { c.name.contains($0) }) }
+            : containers.filter { c in services.contains { ComposeOrchestrator.belongs(c, to: $0, projectName: project) } }
 
         for c in targets {
             try await engine.pause(c.id)
@@ -1531,15 +1652,19 @@ struct ComposeUnpause: AsyncParsableCommand {
 
     @OptionGroup var options: ComposeOptions
 
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
-
     @Argument(help: "Services to unpause (unpauses all if omitted)")
     var services: [String] = []
 
     func run() async throws {
-        let (_, project, projectDir) = try options.loadCompose()
+        let (composeFile, project, projectDir) = try options.loadCompose()
         let config = MockerConfig()
+        try composeFile.validateServiceNames(services)
+
+        if options.dryRun {
+            ComposeDryRun.report("unpause", targets: ComposeStop.dryRunTargets(composeFile, project, services))
+            return
+        }
+
         let engine = try ContainerEngine(config: config)
         let imageManager = try ImageManager(config: config)
         let networkManager = try NetworkManager(config: config)
@@ -1557,7 +1682,7 @@ struct ComposeUnpause: AsyncParsableCommand {
         let containers = try await orchestrator.ps()
         let targets = services.isEmpty
             ? containers
-            : containers.filter { c in services.contains(where: { c.name.contains($0) }) }
+            : containers.filter { c in services.contains { ComposeOrchestrator.belongs(c, to: $0, projectName: project) } }
 
         for c in targets {
             try await engine.unpause(c.id)
@@ -1583,11 +1708,13 @@ struct ComposeLs: AsyncParsableCommand {
     @Flag(name: .shortAndLong, help: "Only display project names")
     var quiet = false
 
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
-
     @Option(name: .long, parsing: .singleValue, help: "Filter output based on conditions provided")
     var filter: [String] = []
+
+    /// `ls` has no ComposeOptions group, so it declares the shared flag itself.
+    /// Listing changes nothing, so there is nothing for a dry run to skip.
+    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
+    var dryRun = false
 
     func run() async throws {
         let config = MockerConfig()
@@ -1641,15 +1768,18 @@ struct ComposeCp: AsyncParsableCommand {
     @Flag(name: .long, help: "Archive mode (copy all uid/gid information)")
     var archive = false
 
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
-
     @Flag(name: [.customShort("L"), .customLong("follow-link")], help: "Always follow symbol link in source path")
     var followLink = false
 
     func run() async throws {
         let (_, project, _) = try options.loadCompose()
         let config = MockerConfig()
+
+        if options.dryRun {
+            ComposeDryRun.report("cp", targets: ["\(source) -> \(destination)"])
+            return
+        }
+
         let engine = try ContainerEngine(config: config)
 
         // Parse service:path format
@@ -1679,9 +1809,6 @@ struct ComposeEvents: AsyncParsableCommand {
     )
 
     @OptionGroup var options: ComposeOptions
-
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
 
     @Flag(name: .long, help: "Output events as a stream of json objects")
     var json = false
@@ -1713,9 +1840,6 @@ struct ComposeAttach: AsyncParsableCommand {
     @Option(name: .customLong("detach-keys"), help: "Override the key sequence for detaching from a container")
     var detachKeys: String?
 
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
-
     @Option(name: .long, help: "Index of the container if service has multiple replicas")
     var index: Int?
 
@@ -1729,11 +1853,18 @@ struct ComposeAttach: AsyncParsableCommand {
     var service: String
 
     func run() async throws {
-        let (_, project, _) = try options.loadCompose()
+        let (composeFile, project, _) = try options.loadCompose()
         let config = MockerConfig()
-        let engine = try ContainerEngine(config: config)
+        try composeFile.validateServiceNames([service])
         let idx = index ?? 1
         let containerName = "\(project)-\(service)-\(idx)"
+
+        if options.dryRun {
+            ComposeDryRun.report("attach", targets: [containerName])
+            return
+        }
+
+        let engine = try ContainerEngine(config: config)
         try await engine.exec(containerName, command: [])
     }
 }
@@ -1753,9 +1884,6 @@ struct ComposeCommit: AsyncParsableCommand {
 
     @Option(name: [.customShort("c"), .long], parsing: .singleValue, help: "Apply Dockerfile instruction to the created image")
     var change: [String] = []
-
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
 
     @Option(name: .long, help: "Index of the container if service has multiple replicas")
     var index: Int?
@@ -1787,9 +1915,6 @@ struct ComposeExport: AsyncParsableCommand {
 
     @OptionGroup var options: ComposeOptions
 
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
-
     @Option(name: .long, help: "Index of the container if service has multiple replicas")
     var index: Int?
 
@@ -1814,9 +1939,6 @@ struct ComposeScale: AsyncParsableCommand {
 
     @OptionGroup var options: ComposeOptions
 
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
-
     @Flag(name: .customLong("no-deps"), help: "Don't start linked services")
     var noDeps = false
 
@@ -1840,9 +1962,6 @@ struct ComposeStats: AsyncParsableCommand {
 
     @Flag(name: .shortAndLong, help: "Show all containers (default shows just running)")
     var all = false
-
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
 
     @Option(name: .long, help: "Format output using a custom template")
     var format: String?
@@ -1869,14 +1988,16 @@ struct ComposeVersion: AsyncParsableCommand {
         abstract: "Show the Docker Compose version information"
     )
 
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
-
     @Option(name: .shortAndLong, help: "Format the output (pretty|json)")
     var format: String?
 
     @Flag(name: .long, help: "Shows only Compose's version number")
     var short = false
+
+    /// `version` has no ComposeOptions group, so it declares the shared flag itself.
+    /// Printing a version changes nothing, so a dry run has nothing to skip.
+    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
+    var dryRun = false
 
     func run() async throws {
         print("Mocker Compose version v\(Version.currentVersion)")
@@ -1892,9 +2013,6 @@ struct ComposeVolumes: AsyncParsableCommand {
     )
 
     @OptionGroup var options: ComposeOptions
-
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
 
     @Option(name: .long, help: "Format output using a custom template")
     var format: String?
@@ -1923,9 +2041,6 @@ struct ComposeWait: AsyncParsableCommand {
     @Flag(name: .customLong("down-project"), help: "Drops project when the first container stops")
     var downProject = false
 
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
-
     @Argument(help: "Service names")
     var services: [String] = []
 
@@ -1943,9 +2058,6 @@ struct ComposeWatch: AsyncParsableCommand {
     )
 
     @OptionGroup var options: ComposeOptions
-
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
 
     @Flag(name: .customLong("no-up"), help: "Do not build & start services before watching")
     var noUp = false
@@ -1974,9 +2086,6 @@ struct ComposeBridge: AsyncParsableCommand {
 
     @OptionGroup var options: ComposeOptions
 
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
-
     func run() async throws {
         throw MockerError.operationFailed("compose bridge is not yet supported with Apple Containerization")
     }
@@ -1994,9 +2103,6 @@ struct ComposePublish: AsyncParsableCommand {
 
     @Flag(name: .long, help: "Published compose application (includes env)")
     var app = false
-
-    @Flag(name: .customLong("dry-run"), help: "Execute command in dry run mode")
-    var dryRun = false
 
     @Option(name: .customLong("oci-version"), help: "OCI image/artifact specification version")
     var ociVersion: String?

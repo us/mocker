@@ -53,4 +53,16 @@ struct ComposeArgNormalizerTests {
         let out = ComposeArgNormalizer.reorder(["compose", "-f", "-p"])
         #expect(out == ["compose", "-f", "-p"])
     }
+
+    @Test("Relocates a global --dry-run placed before the subcommand")
+    func relocateDryRun() {
+        let out = ComposeArgNormalizer.reorder(["compose", "--dry-run", "up", "-d"])
+        #expect(out == ["compose", "up", "--dry-run", "-d"])
+    }
+
+    @Test("Relocates --dry-run alongside value flags")
+    func relocateDryRunWithFile() {
+        let out = ComposeArgNormalizer.reorder(["compose", "-f", "a.yaml", "--dry-run", "build"])
+        #expect(out == ["compose", "build", "-f", "a.yaml", "--dry-run"])
+    }
 }

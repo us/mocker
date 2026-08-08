@@ -136,4 +136,15 @@ struct DockerAPIServerTests {
         #expect(lines.first == "1")
         #expect(lines.last == "200000")
     }
+
+    @Test("Unknown image size and creation date map to 0 over the Engine API")
+    func unknownImageMetadataMapsToZero() {
+        let i = ImageInfo(id: "sha256:abc", repository: "alpine", tag: "3.20")
+
+        let mapped = mapToImageListItem(i)
+
+        // The CLI prints N/A; the Engine API types these as integers, so 0 is deliberate.
+        #expect(mapped["Size"] as? Int == 0)
+        #expect(mapped["Created"] as? Int == 0)
+    }
 }

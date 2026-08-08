@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 @testable import Mocker
+import MockerKit
 
 @Suite("RelativeDate Tests")
 struct RelativeDateTests {

@@ -151,6 +151,12 @@ public struct ImageInspectRootFS: Codable, Sendable {
 }
 
 // MARK: - Pure Mapping Function
+/// Total size of an image: every layer plus its config blob. Shared by `image inspect`
+/// and the `images` listing so the two can never report different sizes.
+func manifestSize(_ manifest: ContainerizationOCI.Manifest) -> Int64 {
+    manifest.layers.reduce(0) { $0 + $1.size } + manifest.config.size
+}
+
 
 /// Maps OCI manifest + config to a Docker-compatible `ImageInspect`. Pure, no I/O.
 ///
@@ -178,7 +184,7 @@ public func mapToImageInspect(
     // Id is the config blob digest, not the index digest — Docker parity for single-platform inspect.
     let id = manifest.config.digest
 
-    let size = manifest.layers.reduce(0) { $0 + $1.size } + manifest.config.size
+    let size = manifestSize(manifest)
 
     let repoTags = overrideRepoTags ?? extractRepoTags(from: reference)
     let repo = extractRepo(from: reference)

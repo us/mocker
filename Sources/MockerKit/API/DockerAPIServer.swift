@@ -147,7 +147,8 @@ final class HTTPHandler: ChannelInboundHandler, @unchecked Sendable {
     private func infoJSON() async -> [String: Any] {
         let containers = (try? await engine.list(all: true)) ?? []
         let running = containers.filter { $0.state == .running }.count
-        let imageCount = ((try? await images.list()) ?? []).count
+        // A count only — no need to read every image's manifest and config.
+        let imageCount = ((try? await images.list(enrich: false)) ?? []).count
         return [
             "ID": "MOCKER",
             "Containers": containers.count,

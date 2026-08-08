@@ -5,16 +5,19 @@ public struct ImageInfo: Codable, Sendable, Identifiable {
     public var id: String
     public var repository: String
     public var tag: String
-    public var size: UInt64
-    public var created: Date
+    /// Total image size in bytes, or nil when it could not be determined —
+    /// rendering an unknown size as `0` reads as a measurement, which it is not.
+    public var size: UInt64?
+    /// Image creation timestamp, or nil when unavailable (see `size`).
+    public var created: Date?
     public var labels: [String: String]
 
     public init(
         id: String,
         repository: String,
         tag: String = "latest",
-        size: UInt64 = 0,
-        created: Date = Date(),
+        size: UInt64? = nil,
+        created: Date? = nil,
         labels: [String: String] = [:]
     ) {
         self.id = id
@@ -35,13 +38,15 @@ public struct ImageInfo: Codable, Sendable, Identifiable {
         "\(repository):\(tag)"
     }
 
-    /// Human-readable size string.
+    /// Human-readable size string, or `N/A` when the size is unknown.
     public var sizeString: String {
-        ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+        guard let size else { return "N/A" }
+        return ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
     }
 
-    /// Formatted creation time relative to now.
+    /// Formatted creation time relative to now, or `N/A` when unknown.
     public var createdAgo: String {
+        guard let created else { return "N/A" }
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return formatter.localizedString(for: created, relativeTo: Date())

@@ -24,29 +24,35 @@ public actor ImageManager {
         // the existing entry does not cover.
         if parsedPlatform == nil,
            let existing = try? await imageStore.get(reference: normalized) {
-            return (Self.toImageInfo(existing), true)
+            return (await Self.toImageInfo(existing), true)
         }
 
         let image = try await imageStore.pull(
             reference: normalized, platform: parsedPlatform, auth: RegistryAuth.resolve(for: normalized)
         )
-        return (Self.toImageInfo(image), false)
+        return (await Self.toImageInfo(image), false)
     }
 
     // MARK: - List
 
     /// List all local images — merges Apple CLI store with our OCI store.
-    public func list() async throws -> [ImageInfo] {
+    /// - Parameter enrich: resolve each image's real SIZE/CREATED. Costs a manifest and
+    ///   config read per image, so callers that only compare repository and tag pass false.
+    public func list(enrich: Bool = true) async throws -> [ImageInfo] {
         // Primary: Apple CLI store (includes pulled and built images)
-        let cliImages = try await listFromCLI()
+        let cliImages = try await listFromCLI(enrich: enrich)
         if !cliImages.isEmpty { return cliImages }
 
         // Fallback: our OCI store
         let images = try await imageStore.list()
-        return images.map(Self.toImageInfo)
+        var infos: [ImageInfo] = []
+        for image in images {
+            infos.append(enrich ? await Self.toImageInfo(image) : Self.basicImageInfo(image))
+        }
+        return infos
     }
 
-    private func listFromCLI() async throws -> [ImageInfo] {
+    private func listFromCLI(enrich: Bool) async throws -> [ImageInfo] {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: Self.containerCLI)
         process.arguments = ["images", "ls"]
@@ -62,11 +68,40 @@ public actor ImageManager {
             }
         }
 
-        return parseCLIImageList(output)
+        let parsed = parseCLIImageList(output)
+        return enrich ? await self.enrich(parsed) : parsed.map(\.info)
     }
 
-    private func parseCLIImageList(_ output: String) -> [ImageInfo] {
-        var results: [ImageInfo] = []
+    /// Fill in SIZE and CREATED for a CLI-derived listing.
+    ///
+    /// `container images ls` prints only NAME/TAG/DIGEST, so the values come from each
+    /// image's manifest and config in the shared content store. An image missing from
+    /// the store keeps its unknown (nil) values rather than a fabricated zero.
+    private func enrich(_ images: [(info: ImageInfo, reference: String)]) async -> [ImageInfo] {
+        var result: [ImageInfo] = []
+        result.reserveCapacity(images.count)
+        for (info, reference) in images {
+            let listedDigest = info.id.replacingOccurrences(of: ".", with: "")
+            guard let image = try? await resolve(reference),
+                  image.digest.hasPrefix(listedDigest) || listedDigest.hasPrefix(image.digest) else {
+                // No match, or a different image happens to answer to that reference —
+                // leave the values unknown rather than attaching another image's metadata.
+                result.append(info)
+                continue
+            }
+            var enriched = info
+            let metadata = await Self.sizeAndCreated(of: image)
+            enriched.size = metadata.size
+            enriched.created = metadata.created
+            result.append(enriched)
+        }
+        return result
+    }
+
+    /// Rows of the CLI listing, each with the reference exactly as the CLI printed it —
+    /// a locally built image is stored under that bare reference, not the display form.
+    private func parseCLIImageList(_ output: String) -> [(info: ImageInfo, reference: String)] {
+        var results: [(info: ImageInfo, reference: String)] = []
         let lines = output.components(separatedBy: "\n").dropFirst() // skip header
         for line in lines {
             let cols = line.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
@@ -75,7 +110,7 @@ public actor ImageManager {
             let tag = cols[1]
             let digest = "sha256:" + cols[2]
             let repo = name.contains(".") || name.contains("/") ? name : "docker.io/library/\(name)"
-            results.append(ImageInfo(id: digest, repository: repo, tag: tag, size: 0, created: Date()))
+            results.append((ImageInfo(id: digest, repository: repo, tag: tag), "\(name):\(tag)"))
         }
         return results
     }
@@ -84,12 +119,10 @@ public actor ImageManager {
 
     /// Remove an image by reference.
     public func remove(_ reference: String) async throws -> ImageInfo {
-        let normalized = try Self.normalize(reference)
-        guard let image = try? await imageStore.get(reference: normalized) else {
-            throw MockerError.imageNotFound(reference)
-        }
-        let info = Self.toImageInfo(image)
-        try await imageStore.delete(reference: normalized)
+        let image = try await resolve(reference)
+        let info = await Self.toImageInfo(image)
+        // Delete the reference that actually matched, never a re-derived one.
+        try await imageStore.delete(reference: image.reference)
         return info
     }
 
@@ -97,19 +130,17 @@ public actor ImageManager {
 
     /// Tag an image with a new reference.
     public func tag(_ source: String, _ target: String) async throws {
-        let src = try Self.normalize(source)
+        let image = try await resolve(source)
         let dst = try Self.normalize(target)
-        _ = try await imageStore.tag(existing: src, new: dst)
+        _ = try await imageStore.tag(existing: image.reference, new: dst)
     }
 
     // MARK: - Inspect
 
     /// Inspect an image reference, returning a Docker-compatible ImageInspect.
     public func inspect(_ reference: String, platform: String? = nil) async throws -> ImageInspect {
-        let normalized = try Self.normalize(reference)
-        guard let image = try? await imageStore.get(reference: normalized) else {
-            throw MockerError.imageNotFound(reference)
-        }
+        let image = try await resolve(reference)
+        let normalized = image.reference
         let resolvedPlatform: ContainerizationOCI.Platform
         if let platformString = platform {
             resolvedPlatform = try ContainerizationOCI.Platform(from: platformString)
@@ -307,16 +338,16 @@ public actor ImageManager {
             throw MockerError.buildError("Build failed with exit code \(exitCode)")
         }
 
-        // Fetch real image info from the store after build
-        let normalized = try Self.normalize(tag)
-        if let image = try? await imageStore.get(reference: normalized) {
-            return Self.toImageInfo(image)
+        // Fetch real image info from the store after build. `container build -t <tag>`
+        // stores the literal tag, so this must resolve verbatim-first too.
+        if let image = try? await resolve(tag) {
+            return await Self.toImageInfo(image)
         }
 
-        // Fallback if store lookup fails (image was built but not indexed)
+        // The build succeeded but the image is not indexed in the store we can read.
+        // Report what is known instead of inventing a digest, size and timestamp.
         let ref = try ImageReference.parse(tag)
-        let digest = "sha256:" + (0..<32).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
-        return ImageInfo(id: digest, repository: ref.fullRepository, tag: ref.tag, size: 0, created: Date())
+        return ImageInfo(id: "", repository: ref.fullRepository, tag: ref.tag)
     }
 
     // MARK: - Push
@@ -324,9 +355,16 @@ public actor ImageManager {
     /// Push an image to a registry.
     /// - Parameter platform: optional `linux/amd64`-style filter; nil pushes the full manifest list.
     public func push(_ reference: String, platform: String? = nil) async throws {
+        // The image is found the way the user spelled it (a local build is stored under
+        // its bare tag), but the push target must be the registry-qualified reference —
+        // it is also the key RegistryAuth resolves credentials with. Tag the local image
+        // under that name first, otherwise the store has nothing to push.
+        let image = try await resolve(reference)
         let normalized = try Self.normalize(reference)
-        guard (try? await imageStore.get(reference: normalized)) != nil else {
-            throw MockerError.imageNotFound(reference)
+        if image.reference != normalized {
+            // Must not be swallowed: pushing after a failed tag would upload whatever
+            // image that reference already points at.
+            _ = try await imageStore.tag(existing: image.reference, new: normalized)
         }
         let parsedPlatform = try platform.map { try ContainerizationOCI.Platform(from: $0) }
         try await imageStore.push(
@@ -338,7 +376,10 @@ public actor ImageManager {
 
     /// Save images to an OCI tar archive.
     public func save(references: [String], to outputPath: String) async throws {
-        let normalizedRefs = try references.map { try Self.normalize($0) }
+        var normalizedRefs: [String] = []
+        for reference in references {
+            normalizedRefs.append(try await resolve(reference).reference)
+        }
         let outputURL = URL(fileURLWithPath: outputPath)
         try await imageStore.save(references: normalizedRefs, out: outputURL)
     }
@@ -347,10 +388,84 @@ public actor ImageManager {
     public func load(from inputPath: String) async throws -> [ImageInfo] {
         let inputURL = URL(fileURLWithPath: inputPath)
         let images = try await imageStore.load(from: inputURL)
-        return images.map(Self.toImageInfo)
+        var infos: [ImageInfo] = []
+        for image in images {
+            infos.append(await Self.toImageInfo(image))
+        }
+        return infos
     }
 
     // MARK: - Helpers
+
+    /// Look an image up the way the user spelled it, falling back to the normalized
+    /// `docker.io/library/...` form.
+    ///
+    /// Store keys are whatever string created them: `container build -t caddy:latest`
+    /// stores a bare reference while a pull stores a fully-qualified one. Normalizing
+    /// first therefore matched a *different* image than the one named — `rmi caddy:latest`
+    /// deleted the pulled base image instead of the local build.
+    private func resolve(_ reference: String) async throws -> Containerization.Image {
+        for candidate in Self.resolutionCandidates(reference) {
+            if let hit = try? await imageStore.get(reference: candidate) {
+                return hit
+            }
+        }
+        throw MockerError.imageNotFound(reference)
+    }
+
+    /// Store keys to try, in order: exactly what the user typed, then the same with an
+    /// implied `:latest`, then the normalized registry-qualified form. Pure, so the
+    /// ordering that keeps `rmi` from deleting the wrong image is directly testable.
+    static func resolutionCandidates(_ reference: String) -> [String] {
+        var candidates = [reference]
+        if !hasTag(reference) {
+            candidates.append("\(reference):latest")
+        }
+        for normalized in [try? normalize(reference), try? normalize(hasTag(reference) ? reference : "\(reference):latest")] {
+            if let normalized, !candidates.contains(normalized) {
+                candidates.append(normalized)
+            }
+        }
+        return candidates
+    }
+
+    /// Whether a reference carries an explicit tag (a colon after the last slash,
+    /// so a registry port like `localhost:5000/app` doesn't count as one).
+    static func hasTag(_ reference: String) -> Bool {
+        let lastComponent = reference.split(separator: "/").last.map(String.init) ?? reference
+        return lastComponent.contains(":")
+    }
+
+    /// Size and creation date of an image, read from its manifest and config.
+    /// Returns nils when the metadata cannot be resolved, so callers surface the gap
+    /// instead of reporting a confident zero.
+    static func sizeAndCreated(of image: Containerization.Image) async -> (size: UInt64?, created: Date?) {
+        guard let manifest = await manifestForListing(of: image) else { return (nil, nil) }
+        let total = manifestSize(manifest)
+        var created: Date?
+        if let content = try? await image.getContent(digest: manifest.config.digest),
+           let config: ContainerizationOCI.Image = try? content.decode(),
+           let stamp = config.created {
+            created = RelativeDate.parse(stamp)
+        }
+        return (UInt64(max(0, total)), created)
+    }
+
+    /// The manifest a listing should measure: the current platform's when present,
+    /// otherwise the image's sole manifest (single-arch images).
+    private static func manifestForListing(
+        of image: Containerization.Image
+    ) async -> ContainerizationOCI.Manifest? {
+        if let matched = try? await image.manifest(for: ContainerizationOCI.Platform.current) {
+            return matched
+        }
+        guard let index = try? await image.index(),
+              let sole = soleManifestDescriptor(from: index.manifests),
+              let content = try? await image.getContent(digest: sole.digest) else {
+            return nil
+        }
+        return try? content.decode()
+    }
 
     private static func normalize(_ reference: String) throws -> String {
         // ContainerizationOCI.Reference.parse requires a fully-qualified reference with domain.
@@ -374,18 +489,29 @@ public actor ImageManager {
         return ref.description
     }
 
-    private static func toImageInfo(_ image: Containerization.Image) -> ImageInfo {
+    /// Repository/tag/digest only — no manifest or config reads.
+    private static func basicImageInfo(_ image: Containerization.Image) -> ImageInfo {
+        let ref = try? ImageReference.parse(image.reference)
+        return ImageInfo(
+            id: image.digest,
+            repository: ref?.fullRepository ?? image.reference,
+            tag: ref?.tag ?? "latest"
+        )
+    }
+
+    private static func toImageInfo(_ image: Containerization.Image) async -> ImageInfo {
         // Parse repo and tag from the reference string
         let ref = try? ImageReference.parse(image.reference)
         let repository = ref?.fullRepository ?? image.reference
         let tag = ref?.tag ?? "latest"
+        let metadata = await sizeAndCreated(of: image)
 
         return ImageInfo(
             id: image.digest,
             repository: repository,
             tag: tag,
-            size: 0,         // Size requires reading all layer blobs — expensive
-            created: Date()  // Created requires reading image config — async
+            size: metadata.size,
+            created: metadata.created
         )
     }
 }
