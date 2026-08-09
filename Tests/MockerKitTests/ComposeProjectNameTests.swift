@@ -143,4 +143,70 @@ struct ComposeProjectNameTests {
         #expect(ComposeFile.merge([base, overlay]).name == "second")
         #expect(ComposeFile.merge([base, noName]).name == "first")
     }
+
+    @Test("The resolved project name is available to ${COMPOSE_PROJECT_NAME}")
+    func projectNameIsInterpolated() throws {
+        let root = try ComposeTestHelpers.makeProjectDir([
+            .file("compose.yaml", """
+            services:
+              web:
+                image: nginx
+                environment:
+                  - PROJECT=${COMPOSE_PROJECT_NAME}
+            """),
+        ])
+
+        let compose = try ComposeFile.load(
+            from: root.appendingPathComponent("compose.yaml").path,
+            projectDir: root,
+            variables: ["COMPOSE_PROJECT_NAME": "resolved-name"]
+        )
+
+        // Without this the variable expanded to an empty string.
+        #expect(compose.services["web"]?.environment["PROJECT"] == "resolved-name")
+    }
+
+    @Test("A caller-resolved project name wins over the environment")
+    func resolvedNameBeatsEnvironment() throws {
+        let root = try ComposeTestHelpers.makeProjectDir([
+            .file(".env", "COMPOSE_PROJECT_NAME=from-dotenv\n"),
+            .file("compose.yaml", """
+            services:
+              web:
+                image: nginx
+                environment:
+                  - PROJECT=${COMPOSE_PROJECT_NAME}
+            """),
+        ])
+
+        let compose = try ComposeFile.load(
+            from: root.appendingPathComponent("compose.yaml").path,
+            projectDir: root,
+            variables: ["COMPOSE_PROJECT_NAME": "from-flag"]
+        )
+
+        #expect(compose.services["web"]?.environment["PROJECT"] == "from-flag")
+    }
+
+    @Test("The environment still outranks .env for ordinary variables")
+    func environmentStillBeatsDotEnv() throws {
+        let root = try ComposeTestHelpers.makeProjectDir([
+            .file(".env", "COMPOSE_PROJECT_NAME=from-dotenv\n"),
+            .file("compose.yaml", """
+            services:
+              web:
+                image: nginx
+                environment:
+                  - PROJECT=${COMPOSE_PROJECT_NAME}
+            """),
+        ])
+
+        // No caller-resolved value: the previous precedence (.env below the shell) holds.
+        let compose = try ComposeFile.load(
+            from: root.appendingPathComponent("compose.yaml").path, projectDir: root
+        )
+
+        let expected = ProcessInfo.processInfo.environment["COMPOSE_PROJECT_NAME"] ?? "from-dotenv"
+        #expect(compose.services["web"]?.environment["PROJECT"] == expected)
+    }
 }

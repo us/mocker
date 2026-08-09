@@ -65,7 +65,13 @@ public struct ComposeFile: Sendable {
 
     /// Parse a compose file at 'path'. '.env' auto-discovery uses 'projectDir/.env'.
     /// Top-level `include:` entries are resolved relative to the file's own directory.
-    public static func load(from path: String, projectDir: URL) throws -> ComposeFile {
+    /// - Parameter variables: values the caller resolved before parsing, exposed to
+    ///   `${VAR}` interpolation. Compose uses this for `COMPOSE_PROJECT_NAME`.
+    public static func load(
+        from path: String,
+        projectDir: URL,
+        variables: [String: String] = [:]
+    ) throws -> ComposeFile {
         let url = URL(fileURLWithPath: path)
         guard FileManager.default.fileExists(atPath: path) else {
             throw MockerError.composeFileNotFound(path)
@@ -76,6 +82,7 @@ public struct ComposeFile: Sendable {
             content: content,
             fileDir: url.standardizedFileURL.deletingLastPathComponent(),
             envFiles: [projectDir.appendingPathComponent(".env").path],
+            variables: variables,
             visited: [url.resolvingSymlinksInPath().path],
             depth: 0
         )
@@ -85,7 +92,11 @@ public struct ComposeFile: Sendable {
     /// '.env' auto-discovery uses 'projectDir/.env'. Throws if content is empty.
     /// `include:` paths resolve relative to `projectDir`, which is all the location
     /// context a piped file has.
-    public static func load(content: String, projectDir: URL) throws -> ComposeFile {
+    public static func load(
+        content: String,
+        projectDir: URL,
+        variables: [String: String] = [:]
+    ) throws -> ComposeFile {
         if content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             throw MockerError.composeParseError("compose file content is empty")
         }
@@ -93,6 +104,7 @@ public struct ComposeFile: Sendable {
             content: content,
             fileDir: projectDir,
             envFiles: [projectDir.appendingPathComponent(".env").path],
+            variables: variables,
             visited: [],
             depth: 0
         )
@@ -111,6 +123,7 @@ public struct ComposeFile: Sendable {
         content: String,
         fileDir: URL,
         envFiles: [String],
+        variables: [String: String] = [:],
         visited: Set<String>,
         depth: Int
     ) throws -> ComposeFile {
@@ -123,8 +136,9 @@ public struct ComposeFile: Sendable {
             dotEnv.merge(loadDotEnv(from: file)) { _, new in new }
         }
 
+
         // Substitute ${VAR:-default} and $VAR patterns before YAML parsing
-        let substituted = substituteVariables(in: content, dotEnv: dotEnv)
+        let substituted = substituteVariables(in: content, dotEnv: dotEnv, resolved: variables)
         guard let dict = try Yams.load(yaml: substituted) as? [String: Any] else {
             throw MockerError.composeParseError("Invalid YAML structure")
         }
@@ -159,6 +173,7 @@ public struct ComposeFile: Sendable {
                     content: body,
                     fileDir: url.deletingLastPathComponent(),
                     envFiles: entryEnvFiles,
+                    variables: variables,
                     visited: visited.union([canonical]),
                     depth: depth + 1
                 )
@@ -283,10 +298,18 @@ public struct ComposeFile: Sendable {
     }
 
     /// Substitute ${VAR}, ${VAR:-default}, and $VAR patterns using env + dotEnv.
-    private static func substituteVariables(in yaml: String, dotEnv: [String: String]) -> String {
+    /// - Parameter resolved: values the caller worked out itself (the project name), which
+    ///   outrank both `.env` and the environment because they are the effective values.
+    private static func substituteVariables(
+        in yaml: String,
+        dotEnv: [String: String],
+        resolved: [String: String] = [:]
+    ) -> String {
         let processEnv = ProcessInfo.processInfo.environment
-        // dotEnv takes lower priority than actual environment
-        let env = dotEnv.merging(processEnv) { _, new in new }
+        // .env is the weakest, then the shell, then whatever the caller resolved.
+        let env = dotEnv
+            .merging(processEnv) { _, new in new }
+            .merging(resolved) { _, new in new }
 
         var result = yaml
         // Match ${VAR:-default}, ${VAR-default}, ${VAR}
