@@ -181,7 +181,8 @@ The project name is resolved in this order, first match wins:
 5. the project directory's name
 
 The resolved name is lowercased, and any character outside `[a-z0-9_-]` becomes a dash.
-`mocker compose config` prints the name it resolved.
+`mocker compose config` prints the name it resolved, and the file can read it back as
+`${COMPOSE_PROJECT_NAME}`.
 
 ```bash
 mocker compose -p staging up -d

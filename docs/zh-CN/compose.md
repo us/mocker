@@ -32,12 +32,19 @@ services:
 
 networks:
   <网络名>:
-    driver: bridge    # 可选
+    driver: bridge      # 可选
+    external: true      # 已在别处创建：只接入，不创建也不删除
+    name: <实际名称>     # 直接使用该名称，不加项目名前缀
 
 volumes:
   <卷名>:
-    driver: local     # 可选
+    driver: local       # 可选
+    external: true      # 同上：不由本项目创建或删除
+    name: <实际名称>
 ```
+
+未声明 `networks:` 的服务会接入项目专属的 `<项目名>-default` 网络，因此不同项目之间
+彼此隔离。运行时只能为容器接入一个网络：服务列出多个网络时会接入第一个并给出提示。
 
 ## 服务定义
 
@@ -296,7 +303,16 @@ mocker compose down
 - 项目 `myapp`，网络 `frontend` → `myapp-frontend`
 - 项目 `myapp`，卷 `pgdata` → `myapp-pgdata`
 
-项目名默认为 Compose 文件所在目录名：
+项目名按以下顺序解析，取第一个匹配项：
+
+1. `-p` / `--project-name`
+2. 环境变量 `COMPOSE_PROJECT_NAME`
+3. 项目目录下 `.env` 中的 `COMPOSE_PROJECT_NAME`
+4. Compose 文件顶层的 `name:`
+5. 项目目录名
+
+解析结果会转为小写，`[a-z0-9_-]` 之外的字符会替换为连字符。`mocker compose config`
+会打印解析后的项目名，文件中也可以用 `${COMPOSE_PROJECT_NAME}` 读回该值。
 
 ```bash
 # 文件位于 /home/user/myapp/docker-compose.yml

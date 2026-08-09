@@ -547,7 +547,9 @@ mocker tag SOURCE TARGET
 
 ### `mocker rmi`
 
-Remove one or more images.
+Remove one or more images, by reference or by image ID (a full or truncated digest, as
+printed by `mocker images -q`). An ID prefix that matches more than one image is an error
+rather than a guess.
 
 ```
 mocker rmi [OPTIONS] IMAGE [IMAGE...]

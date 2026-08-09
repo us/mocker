@@ -42,7 +42,7 @@ mocker exec -it my-app sh
 ## 功能特性
 
 - **Docker CLI 兼容** — `run`、`ps`、`stop`、`rm`、`exec`、`logs`、`build`、`pull`、`push`、`images`、`tag`、`rmi`、`inspect`、`stats`
-- **网络管理** — `network create/ls/rm/inspect/connect/disconnect`
+- **网络管理** — `network create/ls/rm/inspect`，以及 Compose 的 `networks:`
 - **卷管理** — `volume create/ls/rm/inspect`
 - **Docker Compose v2** — `compose up/down/ps/logs/restart`，支持依赖顺序启动
 - **MenuBar GUI** — 原生 SwiftUI 应用 *(即将推出)*
@@ -176,11 +176,8 @@ mocker network create mynet
 # 列出网络
 mocker network ls
 
-# 将容器连接到网络
-mocker network connect mynet myapp
-
-# 断开连接
-mocker network disconnect mynet myapp
+# 启动容器时接入网络
+mocker run --network mynet nginx
 
 # 检查网络详情
 mocker network inspect mynet
