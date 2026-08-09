@@ -83,15 +83,17 @@ public actor ComposeOrchestrator {
 
         // Create networks
         for (fullName, driver) in Self.networksToCreate(composeFile: composeFile, projectName: projectName) {
-            if (try? await networkManager.create(name: fullName, driver: driver)) != nil {
+            do {
+                _ = try await networkManager.create(name: fullName, driver: driver)
                 events.append(.networkCreated(fullName))
-                continue
-            }
-            // Creation fails both when the network already exists and when the runtime
-            // rejects it (it has its own naming rules). Only the first is benign, and a
-            // service cannot join a network that does not exist.
-            guard (try? await networkManager.inspect(fullName)) != nil else {
-                throw MockerError.operationFailed("failed to create network \(fullName)")
+            } catch {
+                // Creation fails both when the network already exists and when the runtime
+                // rejects it (it has its own naming rules). Only the first is benign, and a
+                // service cannot join a network that does not exist — so keep the runtime's
+                // own diagnostic rather than replacing it with a generic one.
+                guard (try? await networkManager.inspect(fullName)) != nil else {
+                    throw error
+                }
             }
         }
 

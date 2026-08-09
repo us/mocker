@@ -1167,7 +1167,7 @@ mocker compose rm [OPTIONS] [SERVICE...]
 |------|-------|-------------|
 | `--force` | | Don't ask to confirm removal |
 | `--stop` | `-s` | Stop the containers, if required, before removing |
-| `--volumes` | `-v` | Not supported: mocker does not track anonymous volumes, so this errors rather than reporting a cleanup it did not do |
+| `--volumes` | `-v` | No effect: mocker does not create anonymous volumes, so there is nothing to remove. Warns rather than reporting a cleanup it did not do |
 | `--dry-run` | | Execute command in dry run mode |
 
 ### `mocker compose kill`
