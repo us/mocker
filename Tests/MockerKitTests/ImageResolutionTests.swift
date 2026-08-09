@@ -66,4 +66,29 @@ struct ImageResolutionTests {
         #expect(known.sizeString.contains("MB"))
         #expect(known.createdAgo != "N/A")
     }
+
+    @Test("An argument that looks like a digest is recognized", arguments: [
+        "sha256:d9e853e87e55", "d9e853e87e55", "sha256:d9e8", "abcd",
+    ])
+    func digestFormsAreRecognized(reference: String) {
+        // `mocker images -q` prints a truncated digest, and `images -q | xargs rmi` is
+        // the usual cleanup, so these must be tried against stored digests.
+        #expect(ImageManager.looksLikeDigest(reference))
+    }
+
+    @Test("Ordinary references are not mistaken for digests", arguments: [
+        "alpine", "alpine:3.20", "docker.io/library/nginx:1.25", "sha256:", "abc", "",
+    ])
+    func namesAreNotDigests(reference: String) {
+        #expect(!ImageManager.looksLikeDigest(reference))
+    }
+
+    @Test("A digest matches with or without the algorithm prefix")
+    func digestBodyIgnoresAlgorithmPrefix() {
+        // `docker rmi` takes the bare hex, `images -q` prints the prefixed form; both must
+        // match the same stored digest.
+        #expect(ImageManager.digestBody("sha256:d9e853") == "d9e853")
+        #expect(ImageManager.digestBody("d9e853") == "d9e853")
+        #expect(ImageManager.digestBody("sha256:d9e853").hasPrefix(ImageManager.digestBody("d9e8")))
+    }
 }

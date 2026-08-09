@@ -410,7 +410,39 @@ public actor ImageManager {
                 return hit
             }
         }
+        // Nothing answered to the reference as a name. `mocker images -q` prints digests
+        // (truncated by default), and `mocker images -q | xargs mocker rmi` is the usual
+        // cleanup, so fall back to matching the stored digests by prefix.
+        if Self.looksLikeDigest(reference) {
+            // `docker rmi` accepts the ID with or without the algorithm prefix, so compare
+            // the hex on both sides rather than the raw strings.
+            let wanted = Self.digestBody(reference)
+            let matches = ((try? await imageStore.list()) ?? [])
+                .filter { Self.digestBody($0.digest).hasPrefix(wanted) }
+            // Distinct images can share a digest through several tags; that is one image.
+            let distinct = Set(matches.map(\.digest))
+            if distinct.count > 1 {
+                throw MockerError.operationFailed(
+                    "image reference \(reference) is ambiguous: it matches \(distinct.count) images")
+            }
+            if let hit = matches.first {
+                return hit
+            }
+        }
         throw MockerError.imageNotFound(reference)
+    }
+
+    /// Whether an argument should be tried as a digest: a full `sha256:...`, the truncated
+    /// form `mocker images -q` prints, or a bare hex prefix as `docker rmi` accepts.
+    static func looksLikeDigest(_ reference: String) -> Bool {
+        let body = digestBody(reference)
+        guard body.count >= 4 else { return false }
+        return body.allSatisfy(\.isHexDigit)
+    }
+
+    /// The hex part of a digest, with any `sha256:` prefix removed.
+    static func digestBody(_ reference: String) -> String {
+        reference.hasPrefix("sha256:") ? String(reference.dropFirst("sha256:".count)) : reference
     }
 
     /// Store keys to try, in order: exactly what the user typed, then the same with an
