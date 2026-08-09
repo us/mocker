@@ -12,6 +12,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **image inspect:** `mocker image inspect` and `mocker inspect --type=image` now return Docker-compatible `ImageInspect` JSON arrays with PascalCase keys instead of the previous lowercase `ImageInfo` object shape.
 * **MockerKit:** `ImageManager.inspect(_:platform:)` returns `ImageInspect` instead of `ImageInfo`.
 
+## [0.8.0](https://github.com/us/mocker/compare/v0.7.2...v0.8.0) (2026-08-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **compose:** projects that set COMPOSE_PROJECT_NAME or a top-level name: resolve to that name now, and names are normalized to [a-z0-9_-], so existing containers, volumes and networks created under the previous name are no longer matched. compose build tags <project>-<service>:latest instead of the bare service name. MockerKit: ImageInfo.size and ImageInfo.created are optional, and ComposeEvent has a new volumeRemoved case.
+
+### Features
+
+* **compose:** support include:, honor project name, volumes and dry-run ([8b6705a](https://github.com/us/mocker/commit/8b6705ad6aa42b9fc047e60fb66177ff7753fc19))
+
 ## [0.7.2](https://github.com/us/mocker/compare/v0.7.1...v0.7.2) (2026-07-06)
 
 
