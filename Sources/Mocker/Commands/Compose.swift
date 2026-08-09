@@ -1204,11 +1204,13 @@ struct ComposeRm: AsyncParsableCommand {
         try composeFile.validateServiceNames(services)
 
         // Upstream removes the anonymous volumes attached to the removed containers.
-        // mocker records no anonymous volumes anywhere, so honoring this flag would be a
-        // no-op that reads as a successful cleanup — say so instead.
+        // mocker never creates one — an anonymous mount is dropped before it reaches the
+        // runtime — so there is nothing to remove. Say so, but still remove the containers
+        // the user asked for rather than failing the whole command over the flag.
         if volumes {
-            throw MockerError.operationFailed(
-                "compose rm --volumes is not yet supported with Apple Containerization")
+            FileHandle.standardError.write(Data(
+                ("WARNING: --volumes has no effect — mocker does not create anonymous volumes, "
+                 + "so there is nothing to remove\n").utf8))
         }
 
         if options.dryRun {
