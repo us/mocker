@@ -12,6 +12,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **image inspect:** `mocker image inspect` and `mocker inspect --type=image` now return Docker-compatible `ImageInspect` JSON arrays with PascalCase keys instead of the previous lowercase `ImageInfo` object shape.
 * **MockerKit:** `ImageManager.inspect(_:platform:)` returns `ImageInspect` instead of `ImageInfo`.
 
+## [0.9.0](https://github.com/us/mocker/compare/v0.8.0...v0.9.0) (2026-08-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **compose:** containers now really join the networks a compose file declares, so services that relied on every container sharing the runtime's global network can no longer reach services in other projects. Networks are no longer stored under ~/.mocker/networks; `network connect`/`disconnect` report that the runtime does not support them. MockerKit: NetworkInfo.created is optional, NetworkManager's methods are async and throwing, and ObservedContainer gained a network field.
+
+### Features
+
+* **compose:** make networks real, add external:, down --rmi and honored flags ([b868cc5](https://github.com/us/mocker/commit/b868cc5f2b5082c507bf12a1f2a126350b847655))
+
+
+### Bug Fixes
+
+* **compose:** keep rm working with -v, and keep the runtime's network error ([2859bcd](https://github.com/us/mocker/commit/2859bcddee5843e78540d4ab6289d0d5ba931448))
+* **runtime:** stop shelling out from deadlocking multi-call commands ([1cddcbe](https://github.com/us/mocker/commit/1cddcbe4d886a185576471f5de0478d2b68b0e4d))
+
 ## [0.8.0](https://github.com/us/mocker/compare/v0.7.2...v0.8.0) (2026-08-09)
 
 
