@@ -107,7 +107,7 @@ struct NetworkList: AsyncParsableCommand {
     func run() async throws {
         let config = MockerConfig()
         let manager = try NetworkManager(config: config)
-        var networks = await manager.list()
+        var networks = try await manager.list()
 
         for f in filter {
             let parts = f.split(separator: "=", maxSplits: 1)
@@ -253,12 +253,18 @@ struct NetworkPrune: AsyncParsableCommand {
 
         let config = MockerConfig()
         let manager = try NetworkManager(config: config)
-        let networks = await manager.list()
+        let networks = try await manager.list()
 
         var removed = 0
-        for n in networks where n.name != "bridge" && n.name != "host" && n.name != "none" {
-            _ = try? await manager.remove(n.name)
-            removed += 1
+        // `list()` now returns the runtime's real networks, which include its built-in
+        // one — pruning that would break every container that does not name a network.
+        for n in networks where !NetworkManager.isBuiltIn(n)
+            && n.name != "bridge" && n.name != "host" && n.name != "none" {
+            // Count what was actually removed: a network with containers attached stays,
+            // and reporting it as deleted sends people looking for a network that is still there.
+            if (try? await manager.remove(n.name)) != nil {
+                removed += 1
+            }
         }
         print("Deleted \(removed) networks")
     }

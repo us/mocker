@@ -222,4 +222,15 @@ struct ComposeConfigTests {
         #expect(reparsed.services["app"]?.environment["NOTE"] == "has # hash")
         #expect(reparsed.services["app"]?.environment["URL"] == "http://example.com:8080")
     }
+
+    @Test("--rmi accepts only all|local and rejects anything else")
+    func rmiValidation() throws {
+        #expect(try ComposeDown.parseRemoveImages(nil) == nil)
+        #expect(try ComposeDown.parseRemoveImages("all") == .all)
+        #expect(try ComposeDown.parseRemoveImages("local") == .local)
+        // Previously any value was accepted and then ignored, which looked like success.
+        #expect(throws: MockerError.self) {
+            _ = try ComposeDown.parseRemoveImages("everything")
+        }
+    }
 }

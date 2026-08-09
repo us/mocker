@@ -1,132 +1,155 @@
 import Foundation
 
-/// Manages container networks.
+/// Manages container networks through Apple's `container` CLI.
+///
+/// Networks used to live in a JSON file of mocker's own, disconnected from the runtime:
+/// nothing it recorded existed as far as the backend was concerned, so a compose
+/// project's `networks:` block had no effect on any container. Every operation now goes
+/// to the real network store, which is what containers are actually attached to.
 public actor NetworkManager {
-    private let config: MockerConfig
-    private var networks: [String: NetworkInfo] = [:]
-    private let storagePath: String
+    private let runner: ProcessRunning
+    private let cli: String
 
-    public init(config: MockerConfig = MockerConfig()) throws {
-        self.config = config
-        self.storagePath = config.networksPath
-        let fm = FileManager.default
-        if !fm.fileExists(atPath: storagePath) {
-            try fm.createDirectory(atPath: storagePath, withIntermediateDirectories: true)
-        }
-
-        // Load persisted networks synchronously during init
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        if let files = try? fm.contentsOfDirectory(atPath: storagePath).filter({ $0.hasSuffix(".json") }) {
-            for file in files {
-                if let data = try? Data(contentsOf: URL(fileURLWithPath: "\(storagePath)/\(file)")),
-                   let info = try? decoder.decode(NetworkInfo.self, from: data) {
-                    networks[info.name] = info
-                }
-            }
-        }
+    public init(
+        config: MockerConfig = MockerConfig(),
+        runner: ProcessRunning = RealProcessRunner(),
+        cli: String = CLIResolver.resolve()
+    ) throws {
+        _ = config
+        self.runner = runner
+        self.cli = cli
     }
 
     /// Create a new network.
-    public func create(name: String, driver: String = "bridge", subnet: String? = nil, gateway: String? = nil) throws -> NetworkInfo {
-        guard networks[name] == nil else {
-            throw MockerError.operationFailed("Network \(name) already exists")
+    /// - Parameters:
+    ///   - driver: accepted for Docker surface parity; the backend has a single mode.
+    ///   - gateway: likewise accepted and not forwarded — the backend derives it from the subnet.
+    /// - Throws: the backend's own message, so a rejected name or an unavailable runtime
+    ///   is distinguishable from "it already exists".
+    public func create(
+        name: String,
+        driver: String = "bridge",
+        subnet: String? = nil,
+        gateway: String? = nil
+    ) async throws -> NetworkInfo {
+        // The runtime has a single mode and derives the gateway from the subnet. Saying
+        // so beats reporting success for a network that does not match what was asked.
+        if driver != "bridge" {
+            FileHandle.standardError.write(Data(
+                "WARNING: network driver \(driver) is not configurable; creating \(name) with the runtime's default\n".utf8))
+        }
+        if let gateway, !gateway.isEmpty {
+            FileHandle.standardError.write(Data(
+                "WARNING: --gateway is not configurable; the runtime derives it from the subnet\n".utf8))
         }
 
-        let info = NetworkInfo(
-            id: generateID(),
-            name: name,
-            driver: driver,
-            subnet: subnet,
-            gateway: gateway,
-            created: Date()
-        )
-        networks[name] = info
-        try saveToDisk(info)
-        return info
+        var arguments = ["network", "create"]
+        if let subnet, !subnet.isEmpty { arguments += ["--subnet", subnet] }
+        arguments.append(name)
+
+        let (output, status) = try await runner.run(executable: cli, arguments: arguments)
+        guard status == 0 else {
+            throw MockerError.operationFailed(Self.errorMessage(from: output, fallback: "failed to create network \(name)"))
+        }
+        // Read the created network back so callers see the subnet the backend assigned.
+        return try await inspect(name)
     }
 
     /// List all networks.
-    public func list() -> [NetworkInfo] {
-        Array(networks.values).sorted { $0.created > $1.created }
+    public func list() async throws -> [NetworkInfo] {
+        let (output, status) = try await runner.run(executable: cli, arguments: ["network", "ls", "--format", "json"])
+        guard status == 0 else {
+            throw MockerError.operationFailed(Self.errorMessage(from: output, fallback: "failed to list networks"))
+        }
+        return Self.parseNetworks(output)
     }
 
     /// Remove a network.
-    public func remove(_ name: String) throws -> NetworkInfo {
-        guard let network = networks[name] else {
-            throw MockerError.networkNotFound(name)
+    public func remove(_ name: String) async throws -> NetworkInfo {
+        // Captured first so the caller can report what went, and so a missing network is
+        // reported as such rather than as a generic CLI failure.
+        let network = try await inspect(name)
+
+        let (output, status) = try await runner.run(executable: cli, arguments: ["network", "delete", name])
+        guard status == 0 else {
+            throw MockerError.operationFailed(Self.errorMessage(from: output, fallback: "failed to remove network \(name)"))
         }
-        guard network.containers.isEmpty else {
-            throw MockerError.operationFailed("Network \(name) has active containers")
-        }
-        networks.removeValue(forKey: name)
-        try deleteFromDisk(network.id)
         return network
     }
 
     /// Inspect a network.
-    public func inspect(_ name: String) throws -> NetworkInfo {
-        guard let network = networks[name] else {
+    public func inspect(_ name: String) async throws -> NetworkInfo {
+        guard let match = try await list().first(where: { $0.name == name }) else {
             throw MockerError.networkNotFound(name)
         }
-        return network
+        return match
     }
 
     /// Connect a container to a network.
-    public func connect(container: String, network: String) throws {
-        guard var net = networks[network] else {
-            throw MockerError.networkNotFound(network)
-        }
-        net.containers.append(container)
-        networks[network] = net
-        try saveToDisk(net)
+    public func connect(container: String, network: String) async throws {
+        throw MockerError.operationFailed(
+            "network connect is not yet supported with Apple Containerization")
     }
 
     /// Disconnect a container from a network.
-    public func disconnect(container: String, network: String) throws {
-        guard var net = networks[network] else {
-            throw MockerError.networkNotFound(network)
+    public func disconnect(container: String, network: String) async throws {
+        throw MockerError.operationFailed(
+            "network disconnect is not yet supported with Apple Containerization")
+    }
+
+    // MARK: - Parsing
+
+    /// Decode `container network ls --format json`. Unparseable entries are skipped
+    /// rather than failing the whole listing.
+    static func parseNetworks(_ json: String) -> [NetworkInfo] {
+        guard let data = json.data(using: .utf8),
+              let entries = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return []
         }
-        net.containers.removeAll { $0 == container }
-        networks[network] = net
-        try saveToDisk(net)
-    }
 
-    // MARK: - Persistence
+        return entries.compactMap { entry in
+            // The backend renamed this object between releases; accept both spellings so
+            // an upgrade does not quietly blank out creation dates and labels.
+            let config = (entry["config"] as? [String: Any])
+                ?? (entry["configuration"] as? [String: Any])
+                ?? [:]
+            guard let name = (config["id"] as? String) ?? (entry["id"] as? String) else { return nil }
+            let status = entry["status"] as? [String: Any] ?? [:]
 
-    private func loadFromDisk() throws {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: storagePath) else { return }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-
-        let files = try fm.contentsOfDirectory(atPath: storagePath)
-            .filter { $0.hasSuffix(".json") }
-
-        for file in files {
-            let data = try Data(contentsOf: URL(fileURLWithPath: "\(storagePath)/\(file)"))
-            let info = try decoder.decode(NetworkInfo.self, from: data)
-            networks[info.name] = info
+            return NetworkInfo(
+                id: name,
+                name: name,
+                driver: config["mode"] as? String ?? "nat",
+                subnet: status["ipv4Subnet"] as? String,
+                gateway: status["ipv4Gateway"] as? String,
+                created: Self.parseCreationDate(config["creationDate"]),
+                labels: config["labels"] as? [String: String] ?? [:]
+            )
         }
+        .sorted { $0.name < $1.name }
     }
 
-    private func saveToDisk(_ info: NetworkInfo) throws {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(info)
-        try data.write(to: URL(fileURLWithPath: "\(storagePath)/\(info.id).json"))
+    /// The backend has encoded this as both a reference-date interval and an ISO-8601
+    /// string across releases; a wrong guess makes `network inspect` report "now" every time.
+    static func parseCreationDate(_ value: Any?) -> Date? {
+        if let seconds = value as? Double { return Date(timeIntervalSinceReferenceDate: seconds) }
+        guard let text = value as? String else { return nil }
+        return RelativeDate.parse(text)
     }
 
-    private func deleteFromDisk(_ id: String) throws {
-        let filePath = "\(storagePath)/\(id).json"
-        if FileManager.default.fileExists(atPath: filePath) {
-            try FileManager.default.removeItem(atPath: filePath)
-        }
+    /// Networks the runtime owns and that must never be pruned, identified the way the
+    /// runtime itself marks them rather than by guessing at names.
+    public static func isBuiltIn(_ network: NetworkInfo) -> Bool {
+        network.labels["com.apple.container.resource.role"] == "builtin" || network.name == "default"
     }
 
-    private func generateID() -> String {
-        let bytes = (0..<16).map { _ in UInt8.random(in: 0...255) }
-        return bytes.map { String(format: "%02x", $0) }.joined()
+    /// The backend prints its diagnostics on stderr, which the runner folds into the
+    /// output; pass the last non-empty line through rather than a generic message.
+    private static func errorMessage(from output: String, fallback: String) -> String {
+        let lines = output
+            .components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return lines.last.map { $0.replacingOccurrences(of: "Error: ", with: "") } ?? fallback
     }
 }

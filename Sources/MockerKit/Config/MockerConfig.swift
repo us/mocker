@@ -71,7 +71,6 @@ public struct MockerConfig: Codable, Sendable {
     public var volumesPath: String { "\(dataRoot)/volumes" }
 
     /// Path for network metadata.
-    public var networksPath: String { "\(dataRoot)/networks" }
 
     /// Discover the Linux kernel binary installed by Apple's container CLI.
     public static var kernelPath: URL? {
@@ -110,7 +109,7 @@ public struct MockerConfig: Codable, Sendable {
     /// Ensure all required directories exist.
     public func ensureDirectories() throws {
         let fm = FileManager.default
-        let dirs = [dataRoot, containersPath, volumesPath, networksPath, ociStorePath.path, logsPath, proxiesPath]
+        let dirs = [dataRoot, containersPath, volumesPath, ociStorePath.path, logsPath, proxiesPath]
         for dir in dirs {
             if !fm.fileExists(atPath: dir) {
                 try fm.createDirectory(atPath: dir, withIntermediateDirectories: true)

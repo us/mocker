@@ -11,6 +11,15 @@ public enum ComposeEvent: Sendable {
     case containerRemoved(String)
     case networkRemoved(String)
     case volumeRemoved(String)
+    case imageRemoved(String)
+}
+
+/// Which images `compose down --rmi` removes.
+public enum ComposeImageRemoval: String, Sendable, CaseIterable {
+    /// Every image the project's services reference, pulled ones included.
+    case all
+    /// Only images compose built itself, i.e. services with no explicit `image:`.
+    case local
 }
 
 /// Orchestrates multi-container deployments from a compose file.
@@ -55,11 +64,34 @@ public actor ComposeOrchestrator {
     ) async throws -> [ComposeEvent] {
         var events: [ComposeEvent] = []
 
+        try composeFile.validateNetworkReferences()
+
+        // An external network is declared, not owned: the project joins it and must not
+        // start at all if it is missing, rather than silently running unconnected.
+        if composeFile.networks.values.contains(where: \.external) {
+            // Listed once: a failure here is a backend problem and must surface as itself,
+            // not as a misleading "your external network is missing".
+            let existing = Set(try await networkManager.list().map(\.name))
+            for network in composeFile.networks.values where network.external {
+                let name = network.runtimeName(projectName: projectName)
+                guard existing.contains(name) else {
+                    throw MockerError.operationFailed(
+                        "network \(name) declared as external, but could not be found")
+                }
+            }
+        }
+
         // Create networks
-        for (name, net) in composeFile.networks.sorted(by: { $0.key < $1.key }) {
-            let fullName = "\(projectName)-\(name)"
-            if (try? await networkManager.create(name: fullName, driver: net.driver)) != nil {
+        for (fullName, driver) in Self.networksToCreate(composeFile: composeFile, projectName: projectName) {
+            if (try? await networkManager.create(name: fullName, driver: driver)) != nil {
                 events.append(.networkCreated(fullName))
+                continue
+            }
+            // Creation fails both when the network already exists and when the runtime
+            // rejects it (it has its own naming rules). Only the first is benign, and a
+            // service cannot join a network that does not exist.
+            guard (try? await networkManager.inspect(fullName)) != nil else {
+                throw MockerError.operationFailed("failed to create network \(fullName)")
             }
         }
 
@@ -78,6 +110,7 @@ public actor ComposeOrchestrator {
                     name: container.name,
                     serviceName: container.labels["com.mocker.compose.service"] ?? "",
                     configHash: container.labels["com.mocker.compose.config-hash"],
+                    network: container.labels["com.mocker.compose.network"],
                     state: container.state
                 )
             } ?? []
@@ -126,7 +159,10 @@ public actor ComposeOrchestrator {
 
         for serviceName in order where !skipSet.contains(serviceName) {
             guard let service = composeFile.services[serviceName] else { continue }
-            let info = try await startService(service, detach: detach, forceBuild: build, noBuild: noBuild)
+            let info = try await startService(
+                service, composeFile: composeFile,
+                detach: detach, forceBuild: build, noBuild: noBuild
+            )
             let containerName = "\(projectName)-\(service.name)-1"
             startedContainers.append((serviceName: serviceName, info: info))
             events.append(.containerStarted(containerName))
@@ -142,24 +178,42 @@ public actor ComposeOrchestrator {
 
     /// Stop and remove all services.
     /// - Parameter removeVolumes: also remove the project's named volumes (compose `down -v`).
-    public func down(composeFile: ComposeFile, removeVolumes: Bool = false) async throws -> [ComposeEvent] {
+    /// - Parameter removeImages: also remove the services' images (compose `down --rmi`).
+    /// - Parameter timeout: seconds to wait for each container to exit (compose `--timeout`).
+    public func down(
+        composeFile: ComposeFile,
+        removeVolumes: Bool = false,
+        removeImages: ComposeImageRemoval? = nil,
+        timeout: Int? = nil
+    ) async throws -> [ComposeEvent] {
         var events: [ComposeEvent] = []
         let containers = try await ps()
 
         for container in containers {
             if container.state.isActive {
-                _ = try await engine.stop(container.id)
+                _ = try await engine.stop(container.id, timeout: timeout)
                 events.append(.containerStopped(container.name))
             }
             _ = try await engine.remove(container.id)
             events.append(.containerRemoved(container.name))
         }
 
-        // Remove networks
-        for (name, _) in composeFile.networks.sorted(by: { $0.key < $1.key }) {
-            let fullName = "\(projectName)-\(name)"
-            if (try? await networkManager.remove(fullName)) != nil {
-                events.append(.networkRemoved(fullName))
+        // Remove networks. The backend can still consider a just-removed container
+        // attached for a moment, so retry briefly instead of silently leaving the
+        // network behind — and say so if it still cannot be removed.
+        for fullName in Self.networksToRemove(composeFile: composeFile, projectName: projectName) {
+            var removed = false
+            for attempt in 0..<3 {
+                if (try? await networkManager.remove(fullName)) != nil {
+                    events.append(.networkRemoved(fullName))
+                    removed = true
+                    break
+                }
+                if attempt < 2 { try? await Task.sleep(for: .milliseconds(300)) }
+            }
+            if !removed {
+                FileHandle.standardError.write(Data(
+                    "WARNING: could not remove network \(fullName); remove it manually once its containers are gone\n".utf8))
             }
         }
 
@@ -167,6 +221,19 @@ public actor ComposeOrchestrator {
             for fullName in Self.volumesToRemove(composeFile: composeFile, projectName: projectName) {
                 if (try? await volumeManager.remove(fullName)) != nil {
                     events.append(.volumeRemoved(fullName))
+                }
+            }
+        }
+
+        if let removeImages {
+            // Best-effort, like the network and volume loops: an image that is missing or
+            // still used by something outside the project must not abort the teardown.
+            for tag in Self.imagesToRemove(composeFile: composeFile, projectName: projectName, mode: removeImages) {
+                if (try? await imageManager.remove(tag)) != nil {
+                    events.append(.imageRemoved(tag))
+                } else {
+                    FileHandle.standardError.write(Data(
+                        "WARNING: could not remove image \(tag)\n".utf8))
                 }
             }
         }
@@ -184,6 +251,78 @@ public actor ComposeOrchestrator {
     ) -> Bool {
         guard belongs(container, toProject: projectName) else { return false }
         return container.labels["com.mocker.compose.service"] == service
+    }
+
+    /// Images `down --rmi` removes, under the tag each service actually runs from.
+    /// `local` is limited to images compose built (no explicit `image:`), matching
+    /// upstream; `all` covers pulled images too. Pure, so the selection is testable
+    /// without a backend.
+    public nonisolated static func imagesToRemove(
+        composeFile: ComposeFile,
+        projectName: String,
+        mode: ComposeImageRemoval
+    ) -> [String] {
+        let services = composeFile.services
+            .sorted { $0.key < $1.key }
+            .map(\.value)
+            .filter { mode == .all || $0.image == nil }
+        // A tag can be shared by two services; remove it once.
+        var seen = Set<String>()
+        return services
+            .map { $0.buildTag(projectName: projectName) }
+            .filter { seen.insert($0).inserted }
+    }
+
+    /// Networks `up` creates: the project-owned ones, under their runtime names.
+    /// External networks are joined, never created.
+    public nonisolated static func networksToCreate(
+        composeFile: ComposeFile,
+        projectName: String
+    ) -> [(name: String, driver: String)] {
+        var networks = composeFile.networks
+            .sorted { $0.key < $1.key }
+            .filter { !$0.value.external }
+            .map { ($0.value.runtimeName(projectName: projectName), $0.value.driver) }
+        if implicitDefaultNetworkNeeded(composeFile: composeFile) {
+            networks.append((implicitDefaultNetwork(projectName: projectName), "bridge"))
+        }
+        return networks
+    }
+
+    /// The project-scoped network Compose gives services that name none. Without it they
+    /// land on the runtime's global network, where unrelated projects can reach each other.
+    public nonisolated static func implicitDefaultNetwork(projectName: String) -> String {
+        "\(projectName)-default"
+    }
+
+    /// The runtime network a service joins: the first it names, else the file's own
+    /// `default:` entry if it has one, else the project's implicit default.
+    public nonisolated static func networkForService(
+        _ service: ComposeService,
+        composeFile: ComposeFile,
+        projectName: String
+    ) -> String {
+        if let named = service.networks.first {
+            return composeFile.networks[named]?.runtimeName(projectName: projectName)
+                ?? "\(projectName)-\(named)"
+        }
+        return composeFile.networks["default"]?.runtimeName(projectName: projectName)
+            ?? implicitDefaultNetwork(projectName: projectName)
+    }
+
+    /// Only needed when some service does not name a network of its own.
+    nonisolated static func implicitDefaultNetworkNeeded(composeFile: ComposeFile) -> Bool {
+        composeFile.services.values.contains { $0.networks.isEmpty }
+            && composeFile.networks["default"] == nil
+    }
+
+    /// Networks `down` may remove — the mirror of `networksToCreate`, so the two can
+    /// never disagree about which networks the project owns.
+    public nonisolated static func networksToRemove(
+        composeFile: ComposeFile,
+        projectName: String
+    ) -> [String] {
+        networksToCreate(composeFile: composeFile, projectName: projectName).map(\.name)
     }
 
     /// Volumes `up` creates: the project-owned ones, under their runtime names.
@@ -257,13 +396,13 @@ public actor ComposeOrchestrator {
         // Recreate services
         var restarted: [(serviceName: String, info: ContainerInfo)] = []
         if let service, let svc = composeFile.services[service] {
-            let info = try await startService(svc, detach: true)
+            let info = try await startService(svc, composeFile: composeFile, detach: true)
             restarted.append((serviceName: service, info: info))
             events.append(.containerStarted("\(projectName)-\(service)-1"))
         } else {
             for serviceName in composeFile.serviceOrder() {
                 guard let svc = composeFile.services[serviceName] else { continue }
-                let info = try await startService(svc, detach: true)
+                let info = try await startService(svc, composeFile: composeFile, detach: true)
                 restarted.append((serviceName: serviceName, info: info))
                 events.append(.containerStarted("\(projectName)-\(serviceName)-1"))
             }
@@ -320,11 +459,24 @@ public actor ComposeOrchestrator {
 
     private func startService(
         _ service: ComposeService,
+        composeFile: ComposeFile = ComposeFile(),
         detach: Bool,
         forceBuild: Bool = false,
         noBuild: Bool = false
     ) async throws -> ContainerInfo {
         let containerName = "\(projectName)-\(service.name)-1"
+
+        // Resolved once: it is both what the container joins and what is recorded on it,
+        // so a later change to the network is visible to the reconcile.
+        let resolvedNetwork = Self.networkForService(
+            service, composeFile: composeFile, projectName: projectName
+        )
+
+        if service.networks.count > 1 {
+            FileHandle.standardError.write(Data(
+                ("WARNING: service \(service.name) lists \(service.networks.count) networks; "
+                 + "the runtime attaches one, joining \(service.networks[0])\n").utf8))
+        }
 
         // Decide whether to build or pull. Per the Compose spec, a service with
         // both `image:` and `build:` is built and tagged with `image:` — not pulled.
@@ -373,13 +525,18 @@ public actor ComposeOrchestrator {
             environment: service.environment,
             ports: ports,
             volumes: volumes,
-            network: service.networks.first.map { "\(projectName)-\($0)" },
+            // Resolved through the network's own declaration so an external network is
+            // joined under its real name instead of a project-prefixed one that
+            // does not exist. Only the first is used: attaching a container to a second
+            // network fails inside the guest on this runtime.
+            network: resolvedNetwork,
             detach: detach,
             labels: service.labels.merging(
                 [
                     "com.mocker.compose.project": projectName,
                     "com.mocker.compose.service": service.name,
                     "com.mocker.compose.config-hash": ComposeService.hash(of: service),
+                    "com.mocker.compose.network": resolvedNetwork,
                 ]
             ) { _, new in new },
             workingDir: service.workingDir,
@@ -455,7 +612,14 @@ extension ComposeOrchestrator {
                 kind = obs.state == .running ? .keep : .start
             case (let .some(obs), false, false):
                 let expectedHash = ComposeService.hash(of: service)
+                let expectedNetwork = networkForService(
+                    service, composeFile: composeFile, projectName: projectName
+                )
                 if obs.configHash != expectedHash {
+                    kind = .removeAndRecreate
+                } else if obs.network != expectedNetwork {
+                    // Also covers containers from a version that never recorded a network
+                    // and never joined one: they need recreating to land on the project's.
                     kind = .removeAndRecreate
                 } else if let digest = obs.imageDigest, digest != service.image {
                     kind = .removeAndRecreate
@@ -474,6 +638,9 @@ public struct ObservedContainer: Sendable, Equatable {
     public let name: String
     public let serviceName: String
     public let configHash: String?
+    /// The network the container was created on, from its label — a change here is not
+    /// visible in the service hash but still requires a new container.
+    public let network: String?
     public let imageDigest: String?
     public let state: ContainerState
 
@@ -481,12 +648,14 @@ public struct ObservedContainer: Sendable, Equatable {
         name: String,
         serviceName: String,
         configHash: String? = nil,
+        network: String? = nil,
         imageDigest: String? = nil,
         state: ContainerState = .running
     ) {
         self.name = name
         self.serviceName = serviceName
         self.configHash = configHash
+        self.network = network
         self.imageDigest = imageDigest
         self.state = state
     }

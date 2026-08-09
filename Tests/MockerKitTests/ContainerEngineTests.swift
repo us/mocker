@@ -234,6 +234,24 @@ struct ContainerEngineTests {
         #expect(args.contains("/path/to/kernel"))
     }
 
+    @Test("A configured network is passed to the runtime")
+    func testRunArgumentsNetwork() {
+        let config = ContainerConfig(image: "alpine:3.20", network: "shared")
+
+        let args = ContainerEngine.buildRunArguments(name: "joined", config: config)
+
+        // The field was carried on the config but never emitted, so a compose service's
+        // `networks:` had no effect on the container at all.
+        #expect(args.firstIndex(of: "--network").map { args[$0 + 1] } == "shared")
+    }
+
+    @Test("No network flag is emitted when none is configured")
+    func testRunArgumentsNoNetwork() {
+        let config = ContainerConfig(image: "alpine:3.20")
+
+        #expect(!ContainerEngine.buildRunArguments(name: "solo", config: config).contains("--network"))
+    }
+
     @Test("Run arguments publish TCP ports natively with -p")
     func testRunArgumentsPublishTCPPort() {
         let config = ContainerConfig(
@@ -413,4 +431,5 @@ private final class RootedFileManager: FileManager, @unchecked Sendable {
     override func isExecutableFile(atPath path: String) -> Bool {
         super.isExecutableFile(atPath: root + path)
     }
+
 }

@@ -342,9 +342,15 @@ public struct ComposeFile: Sendable {
         var networks: [String: ComposeNetwork] = [:]
         for (name, value) in dict {
             let netDict = value as? [String: Any] ?? [:]
+            // `external` is either a bool or, in the legacy long form, a mapping
+            // (`external: {name: shared}`) — both mean "not owned by this project".
+            let externalDict = netDict["external"] as? [String: Any]
+            let external = netDict["external"] as? Bool ?? (netDict["external"] != nil)
             networks[name] = ComposeNetwork(
                 name: name,
-                driver: netDict["driver"] as? String ?? "bridge"
+                driver: netDict["driver"] as? String ?? "bridge",
+                external: external,
+                customName: netDict["name"] as? String ?? externalDict?["name"] as? String
             )
         }
         return networks
@@ -405,6 +411,17 @@ public struct ComposeFile: Sendable {
 
         let filteredServices = services.filter { included.contains($0.key) }
         return ComposeFile(services: filteredServices, networks: networks, volumes: volumes, name: self.name)
+    }
+
+    /// Throw when a service joins a network the file never declares — the container
+    /// would otherwise be started against a network nothing creates.
+    public func validateNetworkReferences() throws {
+        for service in services.values.sorted(by: { $0.name < $1.name }) {
+            for network in service.networks where networks[network] == nil {
+                throw MockerError.composeParseError(
+                    "service \(service.name) refers to undefined network \(network)")
+            }
+        }
     }
 
     /// Throw `no such service: <name>` for any requested name absent from the project,
@@ -516,7 +533,16 @@ public struct ComposeService: Sendable {
         let environment = parseEnvironment(dict["environment"])
         let ports = (dict["ports"] as? [Any])?.compactMap { "\($0)" } ?? []
         let volumes = (dict["volumes"] as? [Any])?.compactMap { "\($0)" } ?? []
-        let networks = (dict["networks"] as? [Any])?.compactMap { "\($0)" } ?? []
+        // Both spellings are valid: a list of names, or a mapping whose keys are the
+        // names and whose values carry per-network options such as `aliases`.
+        let networks: [String]
+        if let list = dict["networks"] as? [Any] {
+            networks = list.compactMap { "\($0)" }
+        } else if let mapping = dict["networks"] as? [String: Any] {
+            networks = mapping.keys.sorted()
+        } else {
+            networks = []
+        }
         let dependsOn = parseDependsOn(dict["depends_on"])
         let command = parseCommand(dict["command"])
         let labels = (dict["labels"] as? [String: String]) ?? [:]
@@ -844,12 +870,27 @@ public enum ComposeImageSource: Sendable, Equatable {
 
 /// Network definition in a compose file.
 public struct ComposeNetwork: Sendable {
+    /// The key this network is declared under in the compose file.
     public var name: String
     public var driver: String
+    /// `external: true` — the network lives outside the project lifecycle: it is
+    /// neither created nor removed by the project, only joined.
+    public var external: Bool
+    /// Explicit `name:` override — used verbatim, without the project prefix.
+    public var customName: String?
 
-    public init(name: String, driver: String = "bridge") {
+    public init(name: String, driver: String = "bridge", external: Bool = false, customName: String? = nil) {
         self.name = name
         self.driver = driver
+        self.external = external
+        self.customName = customName
+    }
+
+    /// The network's real name in the runtime: an explicit `name:` wins, an external
+    /// network keeps its declared key, and everything else is project-namespaced.
+    public func runtimeName(projectName: String) -> String {
+        if let customName { return customName }
+        return external ? name : "\(projectName)-\(name)"
     }
 }
 

@@ -7,14 +7,17 @@ import MockerKit
 @Suite("NetworkInspect CLI Tests")
 struct NetworkInspectCLITests {
 
+    /// One `container network ls --format json` row, so these exercise the CLI mapping
+    /// without touching the machine's real networks.
+    private static let listJSON = """
+    [{"status":{"ipv4Gateway":"10.0.0.1","ipv4Subnet":"10.0.0.0/8"},
+      "id":"testnet","state":"running",
+      "config":{"mode":"nat","labels":{},"creationDate":807968813.8,"id":"testnet"}}]
+    """
+
     @Test("network inspect unknown target throws networkNotFound")
     func network_inspect_unknown_exits_one() async throws {
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mocker-test-\(UUID().uuidString)").path
-        defer { try? FileManager.default.removeItem(atPath: tempDir) }
-        let config = MockerConfig(dataRoot: tempDir)
-        try config.ensureDirectories()
-        let manager = try NetworkManager(config: config)
+        let manager = try NetworkManager(runner: MockProcessRunner(responses: [("[]", 0)]))
         await #expect(throws: MockerError.self) {
             _ = try await inspectNetworks(targets: ["ghostnet"], manager: manager)
         }
@@ -22,13 +25,7 @@ struct NetworkInspectCLITests {
 
     @Test("network inspect single target emits JSON array with PascalCase keys")
     func network_inspect_single_emits_array() async throws {
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mocker-test-\(UUID().uuidString)").path
-        defer { try? FileManager.default.removeItem(atPath: tempDir) }
-        let config = MockerConfig(dataRoot: tempDir)
-        try config.ensureDirectories()
-        let manager = try NetworkManager(config: config)
-        _ = try await manager.create(name: "testnet", driver: "bridge", subnet: "10.0.0.0/8", gateway: "10.0.0.1")
+        let manager = try NetworkManager(runner: MockProcessRunner(responses: [(Self.listJSON, 0)]))
         let results = try await inspectNetworks(targets: ["testnet"], manager: manager)
         #expect(results.count == 1)
         #expect(results[0].Name == "testnet")

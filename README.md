@@ -45,7 +45,7 @@ See the **[CHANGELOG](CHANGELOG.md)** for the full, always-current release histo
 ## Features
 
 - **Docker CLI compatible** — `run`, `ps`, `stop`, `rm`, `exec`, `logs`, `build`, `pull`, `push`, `images`, `tag`, `rmi`, `inspect`, `stats`
-- **Network management** — `network create/ls/rm/inspect/connect/disconnect`
+- **Network management** — `network create/ls/rm/inspect`, and compose `networks:`
 - **Volume management** — `volume create/ls/rm/inspect`
 - **Docker Compose v2** — `compose up/down/ps/logs/restart` with dependency ordering
 - **MenuBar GUI** — Native SwiftUI app *(coming soon)*
@@ -226,11 +226,8 @@ mocker network create mynet
 # List networks
 mocker network ls
 
-# Connect a container
-mocker network connect mynet myapp
-
-# Disconnect
-mocker network disconnect mynet myapp
+# Attach a container at run time
+mocker run --network mynet nginx
 
 # Inspect
 mocker network inspect mynet
@@ -347,7 +344,7 @@ mocker/
 | Concern | Approach |
 |---------|----------|
 | Thread safety | All engines/managers are `actor` types |
-| Persistence | JSON files in `~/.mocker/{containers,images,networks,volumes}/` |
+| Persistence | JSON files in `~/.mocker/{containers,images,volumes}/`; networks live in the container runtime itself |
 | CLI parsing | `swift-argument-parser` with `AsyncParsableCommand` |
 | YAML parsing | `Yams` library |
 | Compose naming | Docker v2 convention: `projectName-serviceName-1` (hyphen separator) |
@@ -361,7 +358,6 @@ Mocker stores all state in `~/.mocker/`:
 ~/.mocker/
 ├── containers/   # Container metadata (one JSON file per container)
 ├── images/       # Image metadata
-├── networks/     # Network metadata
 └── volumes/      # Volume metadata + actual data directories
     └── pgdata/
         └── _data/

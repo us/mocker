@@ -543,23 +543,27 @@ Services start in dependency order (`depends_on`). Networks and volumes are crea
 Stop and remove containers and networks.
 
 ```bash
-mocker compose [OPTIONS] down [--volumes]
+mocker compose [OPTIONS] down [--volumes] [--rmi all|local]
 ```
 
 **Flags:**
 ```
 -v, --volumes   Also remove the project's named volumes
+    --rmi       Also remove the services' images: `local` for the images
+                compose built, `all` for pulled images too
 ```
 
 **Examples:**
 ```bash
 mocker compose down
 mocker compose down --volumes
+mocker compose down --rmi local
 mocker compose -f staging.yml down
 ```
 
 `--volumes` removes the volumes declared in the file's top-level `volumes:` section.
-Volumes marked `external: true` are never removed.
+Volumes and networks marked `external: true` are never removed — an external network is
+joined under its own name and left in place.
 
 ---
 

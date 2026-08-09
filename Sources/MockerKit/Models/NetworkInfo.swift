@@ -8,7 +8,7 @@ public struct NetworkInfo: Codable, Sendable, Identifiable {
     public var subnet: String?
     public var gateway: String?
     public var containers: [String]
-    public var created: Date
+    public var created: Date?
     public var labels: [String: String]
 
     public init(
@@ -18,7 +18,7 @@ public struct NetworkInfo: Codable, Sendable, Identifiable {
         subnet: String? = nil,
         gateway: String? = nil,
         containers: [String] = [],
-        created: Date = Date(),
+        created: Date? = nil,
         labels: [String: String] = [:]
     ) {
         self.id = id
