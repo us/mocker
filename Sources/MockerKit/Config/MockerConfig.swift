@@ -70,8 +70,6 @@ public struct MockerConfig: Codable, Sendable {
     /// Path for volume storage.
     public var volumesPath: String { "\(dataRoot)/volumes" }
 
-    /// Path for network metadata.
-
     /// Discover the Linux kernel binary installed by Apple's container CLI.
     public static var kernelPath: URL? {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
