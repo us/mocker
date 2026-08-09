@@ -91,4 +91,40 @@ struct ImageResolutionTests {
         #expect(ImageManager.digestBody("d9e853") == "d9e853")
         #expect(ImageManager.digestBody("sha256:d9e853").hasPrefix(ImageManager.digestBody("d9e8")))
     }
+
+    private static let digests = [
+        "sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+        "sha256:d9e8ff0000000000000000000000000000000000000000000000000000000000",
+        "sha256:edf820e05c3374485390e7fe3669f1b6b429eda502a6d174a456647fb9ed26fe",
+    ]
+
+    @Test("A full digest matches exactly one image")
+    func fullDigestMatchesOne() {
+        #expect(ImageManager.matchingDigests(Self.digests[0], in: Self.digests) == [Self.digests[0]])
+    }
+
+    @Test("A bare hex prefix matches, with or without the algorithm prefix")
+    func bareHexPrefixMatches() {
+        // `mocker rmi d9e853e87e55` — the form `docker rmi` takes — used to match nothing.
+        #expect(ImageManager.matchingDigests("d9e853e87e55", in: Self.digests) == [Self.digests[0]])
+        #expect(ImageManager.matchingDigests("sha256:d9e853e87e55", in: Self.digests) == [Self.digests[0]])
+    }
+
+    @Test("A prefix shared by two images is reported as ambiguous, never picked")
+    func ambiguousPrefix() {
+        // `rmi` deletes; guessing between two images is the one thing it must not do.
+        #expect(ImageManager.matchingDigests("d9e8", in: Self.digests).count == 2)
+    }
+
+    @Test("Several tags of one image are one match, not an ambiguity")
+    func repeatedDigestIsOneImage() {
+        let sameImageTwice = [Self.digests[0], Self.digests[0]]
+
+        #expect(ImageManager.matchingDigests("d9e853", in: sameImageTwice) == [Self.digests[0]])
+    }
+
+    @Test("A prefix matching nothing yields nothing")
+    func unknownPrefixMatchesNothing() {
+        #expect(ImageManager.matchingDigests("ffff", in: Self.digests).isEmpty)
+    }
 }
