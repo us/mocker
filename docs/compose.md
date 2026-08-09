@@ -27,6 +27,8 @@ services:
 networks:
   <name>:
     driver: bridge
+    external: true      # declared elsewhere: joined, never created or removed
+    name: <real-name>   # explicit name, used verbatim without the project prefix
 
 volumes:
   <name>:
@@ -122,6 +124,10 @@ directory of the first `-f` file). Shell environment takes priority over `.env`.
 ---
 
 ## Networking
+
+Networks declared in the file are created in the container runtime and services are
+attached to them. A service joins one network — the runtime attaches a container to a
+single network, so a service listing several joins the first and says so.
 
 Services on the same network can reach each other by service name:
 
@@ -239,6 +245,12 @@ mocker compose down -v
 
 `-v` removes the volumes declared in the top-level `volumes:` section. Volumes marked
 `external: true` are never removed.
+
+```bash
+# also remove the services' images
+mocker compose down --rmi local   # only images compose built
+mocker compose down --rmi all     # pulled images too
+```
 
 ---
 

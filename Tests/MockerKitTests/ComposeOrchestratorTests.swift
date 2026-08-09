@@ -242,13 +242,41 @@ struct ComposeOrchestratorTests {
         """)
     }
 
+    /// Defaults to the project's implicit network, which is where a container created by
+    /// the current code actually lands — pass an explicit value to model an upgrade from a
+    /// version that recorded no network at all.
     private func observed(
         name: String,
         serviceName: String,
         configHash: String?,
+        network: String? = "proj-default",
         state: ContainerState = .running
     ) -> ObservedContainer {
-        ObservedContainer(name: name, serviceName: serviceName, configHash: configHash, state: state)
+        ObservedContainer(
+            name: name, serviceName: serviceName, configHash: configHash,
+            network: network, state: state
+        )
+    }
+
+    @Test("A container with no recorded network is recreated onto the project's network")
+    func reconcileRecreatesUnnetworkedContainer() throws {
+        let file = try singleServiceFile()
+        let svc = file.services["app"]!
+
+        let actions = ComposeOrchestrator.reconcileDecision(
+            observedContainers: [
+                observed(name: "proj-app-1", serviceName: "app",
+                         configHash: ComposeService.hash(of: svc), network: nil)
+            ],
+            composeFile: file,
+            projectName: "proj",
+            forceRecreate: false,
+            noRecreate: false
+        )
+
+        // Containers from a version that never passed --network sit on the runtime's
+        // global network; leaving them there would silently skip the isolation fix.
+        #expect(actions == [ReconcileAction(serviceName: "app", kind: .removeAndRecreate)])
     }
 
     @Test("reconcileDecision: observed container matches hash + defaults → .keep")

@@ -165,6 +165,12 @@ public actor ContainerEngine {
             args.append("--virtualization")
         }
 
+        // `network` was carried on the config but never emitted, so a compose service's
+        // `networks:` had no effect on the container at all.
+        if let network = containerConfig.network, !network.isEmpty {
+            args += ["--network", network]
+        }
+
         if let kernel = containerConfig.kernel, !kernel.isEmpty {
             args += ["--kernel", kernel]
         }
@@ -250,13 +256,19 @@ public actor ContainerEngine {
 
     // MARK: - Stop
 
-    public func stop(_ identifier: String) async throws -> ContainerInfo {
+    /// - Parameter timeout: seconds to wait for the container to exit before it is
+    ///   killed. `compose stop`/`down` pass their `--timeout` here; it used to be parsed
+    ///   and dropped, leaving every teardown on the runtime's own default.
+    public func stop(_ identifier: String, timeout: Int? = nil) async throws -> ContainerInfo {
         let container = try await resolve(identifier)
         guard container.state == .running else {
             throw MockerError.containerNotRunning(identifier)
         }
 
-        let (_, exitCode) = try await runCLI(["stop", container.name])
+        var arguments = ["stop"]
+        if let timeout { arguments += ["-t", String(timeout)] }
+        arguments.append(container.name)
+        let (_, exitCode) = try await runCLI(arguments)
         guard exitCode == 0 else {
             throw MockerError.operationFailed("failed to stop container \(container.name)")
         }

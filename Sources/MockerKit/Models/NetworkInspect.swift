@@ -120,7 +120,9 @@ public func mapToNetworkInspect(_ info: NetworkInfo) -> NetworkInspect {
     }
     return NetworkInspect(
         Name: info.name, Id: info.id,
-        Created: rfc3339String(info.created),
+        // The Docker inspect model types this as a string; an unknown timestamp is
+        // reported as empty rather than as a fabricated "now".
+        Created: info.created.map(rfc3339String) ?? "",
         Scope: "local", Driver: info.driver,
         EnableIPv4: true, EnableIPv6: false,
         IPAM: NetworkIPAM(Driver: "default", Options: nil, Config: ipamConfig),

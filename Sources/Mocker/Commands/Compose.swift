@@ -136,6 +136,7 @@ enum ComposeFormatter {
         case .containerRemoved(let name): ("Container \(name)", "Removed")
         case .networkRemoved(let name): ("Network \(name)", "Removed")
         case .volumeRemoved(let name): ("Volume \(name)", "Removed")
+        case .imageRemoved(let name): ("Image \(name)", "Removed")
         }
     }
 }
@@ -315,11 +316,17 @@ struct ComposeDown: AsyncParsableCommand {
     func run() async throws {
         let (composeFile, project, projectDir) = try options.loadCompose()
         let config = MockerConfig()
+        let removeImages = try Self.parseRemoveImages(rmi)
 
         if options.dryRun {
             var targets = composeFile.services.keys.sorted().map { "\(project)-\($0)-1" }
             if volumes {
                 targets += ComposeOrchestrator.volumesToRemove(composeFile: composeFile, projectName: project)
+            }
+            if let removeImages {
+                targets += ComposeOrchestrator.imagesToRemove(
+                    composeFile: composeFile, projectName: project, mode: removeImages
+                )
             }
             ComposeDryRun.report("down", targets: targets)
             return
@@ -339,9 +346,23 @@ struct ComposeDown: AsyncParsableCommand {
             volumeManager: volumeManager
         )
 
-        let events = try await orchestrator.down(composeFile: composeFile, removeVolumes: volumes)
+        let events = try await orchestrator.down(
+            composeFile: composeFile, removeVolumes: volumes,
+            removeImages: removeImages, timeout: timeout
+        )
         let totalResources = events.count
         ComposeFormatter.printEvents(events, total: totalResources)
+    }
+
+    /// Validate `--rmi`. An unrecognized value used to be accepted and ignored, which
+    /// looks identical to a teardown that removed the images.
+    static func parseRemoveImages(_ value: String?) throws -> ComposeImageRemoval? {
+        guard let value else { return nil }
+        guard let mode = ComposeImageRemoval(rawValue: value) else {
+            let valid = ComposeImageRemoval.allCases.map(\.rawValue).joined(separator: "|")
+            throw MockerError.operationFailed("invalid --rmi value: \(value) (expected \(valid))")
+        }
+        return mode
     }
 }
 
@@ -1084,8 +1105,11 @@ struct ComposeStop: AsyncParsableCommand {
             : containers.filter { c in services.contains { ComposeOrchestrator.belongs(c, to: $0, projectName: project) } }
 
         for c in targets {
-            _ = try? await engine.stop(c.id)
-            print("Container \(c.name)  Stopped")
+            if (try? await engine.stop(c.id, timeout: timeout)) != nil {
+                print("Container \(c.name)  Stopped")
+            } else {
+                FileHandle.standardError.write(Data("WARNING: could not stop \(c.name)\n".utf8))
+            }
         }
     }
 
@@ -1178,6 +1202,14 @@ struct ComposeRm: AsyncParsableCommand {
         let (composeFile, project, projectDir) = try options.loadCompose()
         let config = MockerConfig()
         try composeFile.validateServiceNames(services)
+
+        // Upstream removes the anonymous volumes attached to the removed containers.
+        // mocker records no anonymous volumes anywhere, so honoring this flag would be a
+        // no-op that reads as a successful cleanup — say so instead.
+        if volumes {
+            throw MockerError.operationFailed(
+                "compose rm --volumes is not yet supported with Apple Containerization")
+        }
 
         if options.dryRun {
             ComposeDryRun.report("rm", targets: ComposeStop.dryRunTargets(composeFile, project, services))
