@@ -414,18 +414,14 @@ public actor ImageManager {
         // (truncated by default), and `mocker images -q | xargs mocker rmi` is the usual
         // cleanup, so fall back to matching the stored digests by prefix.
         if Self.looksLikeDigest(reference) {
-            // `docker rmi` accepts the ID with or without the algorithm prefix, so compare
-            // the hex on both sides rather than the raw strings.
-            let wanted = Self.digestBody(reference)
-            let matches = ((try? await imageStore.list()) ?? [])
-                .filter { Self.digestBody($0.digest).hasPrefix(wanted) }
-            // Distinct images can share a digest through several tags; that is one image.
-            let distinct = Set(matches.map(\.digest))
+            let stored = (try? await imageStore.list()) ?? []
+            let distinct = Self.matchingDigests(reference, in: stored.map(\.digest))
             if distinct.count > 1 {
                 throw MockerError.operationFailed(
                     "image reference \(reference) is ambiguous: it matches \(distinct.count) images")
             }
-            if let hit = matches.first {
+            if let digest = distinct.first,
+               let hit = stored.first(where: { $0.digest == digest }) {
                 return hit
             }
         }
@@ -438,6 +434,18 @@ public actor ImageManager {
         let body = digestBody(reference)
         guard body.count >= 4 else { return false }
         return body.allSatisfy(\.isHexDigit)
+    }
+
+    /// Digests matching `reference` as a prefix, deduplicated: several tags of one image
+    /// share a digest and are one image, not an ambiguity. Pure, so the matching and the
+    /// ambiguity rule can be tested without a store.
+    static func matchingDigests(_ reference: String, in digests: [String]) -> [String] {
+        // `docker rmi` takes the ID with or without the algorithm prefix, so compare hex.
+        let wanted = digestBody(reference).lowercased()
+        var seen: Set<String> = []
+        return digests
+            .filter { digestBody($0).lowercased().hasPrefix(wanted) }
+            .filter { seen.insert($0).inserted }
     }
 
     /// The hex part of a digest, with any `sha256:` prefix removed.
