@@ -21,35 +21,25 @@ public struct RealProcessRunner: ProcessRunning {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
+        // Drain both pipes concurrently: if one fills while the other is not being read,
+        // the child blocks on write and never exits.
+        let outHandle = stdoutPipe.fileHandleForReading
+        let errHandle = stderrPipe.fileHandleForReading
+        let outTask = Task.detached { outHandle.readDataToEndOfFile() }
+        let errTask = Task.detached { errHandle.readDataToEndOfFile() }
+
         try process.run()
 
-        // Read stdout and stderr concurrently to prevent pipe-buffer deadlock.
-        // If one pipe fills while the other isn't being drained, the child blocks.
-        return await withCheckedContinuation { continuation in
-            var outData = Data()
-            var errData = Data()
-            let group = DispatchGroup()
-
-            group.enter()
-            DispatchQueue.global().async {
-                outData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                group.leave()
-            }
-
-            group.enter()
-            DispatchQueue.global().async {
-                errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-                group.leave()
-            }
-
-            group.notify(queue: .global()) {
-                process.waitUntilExit()
-                let out = String(data: outData, encoding: .utf8) ?? ""
-                let err = String(data: errData, encoding: .utf8) ?? ""
-                let combined = out.isEmpty ? err : out
-                continuation.resume(returning: (combined, process.terminationStatus))
-            }
+        // Exit is observed through `terminationHandler` rather than `waitUntilExit()`:
+        // the blocking call can wedge a thread that Swift concurrency needed, which
+        // deadlocked commands that shell out several times (compose down).
+        let status: Int32 = await withCheckedContinuation { continuation in
+            process.terminationHandler = { continuation.resume(returning: $0.terminationStatus) }
         }
+
+        let out = String(data: await outTask.value, encoding: .utf8) ?? ""
+        let err = String(data: await errTask.value, encoding: .utf8) ?? ""
+        return (out.isEmpty ? err : out, status)
     }
 }
 

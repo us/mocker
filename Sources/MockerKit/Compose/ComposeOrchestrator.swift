@@ -201,7 +201,12 @@ public actor ComposeOrchestrator {
         // Remove networks. The backend can still consider a just-removed container
         // attached for a moment, so retry briefly instead of silently leaving the
         // network behind — and say so if it still cannot be removed.
+        let existingNetworks = Set(((try? await networkManager.list()) ?? []).map(\.name))
         for fullName in Self.networksToRemove(composeFile: composeFile, projectName: projectName) {
+            // Nothing to do for a project that is already down — retrying that would burn
+            // a second and end in a warning telling the user to remove what is not there.
+            guard existingNetworks.contains(fullName) else { continue }
+
             var removed = false
             for attempt in 0..<3 {
                 if (try? await networkManager.remove(fullName)) != nil {
