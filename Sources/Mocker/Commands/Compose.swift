@@ -81,21 +81,38 @@ struct ComposeOptions: ParsableArguments {
             paths = files
         }
 
-        let loaded = try paths.map { entry -> ComposeFile in
-            if entry == "-" {
-                let data = try FileHandle.standardInput.readToEnd() ?? Data()
-                let content = String(decoding: data, as: UTF8.self)
-                return try ComposeFile.load(content: content, projectDir: projectDir)
+        // The name must be known before parsing so the file can interpolate
+        // `${COMPOSE_PROJECT_NAME}`, but the file's own `name:` is one of its sources.
+        // Parse with what is known, and if the file named the project something else,
+        // parse again so the value it interpolates is the one actually used.
+        func parse(withProjectName name: String) throws -> ComposeFile {
+            let variables = ["COMPOSE_PROJECT_NAME": name]
+            let loaded = try paths.map { entry -> ComposeFile in
+                if entry == "-" {
+                    let data = try FileHandle.standardInput.readToEnd() ?? Data()
+                    let content = String(decoding: data, as: UTF8.self)
+                    return try ComposeFile.load(content: content, projectDir: projectDir, variables: variables)
+                }
+                return try ComposeFile.load(from: entry, projectDir: projectDir, variables: variables)
             }
-            return try ComposeFile.load(from: entry, projectDir: projectDir)
+            return ComposeFile.merge(loaded)
         }
-        let composeFile = ComposeFile.merge(loaded)
 
-        let project = ComposeFile.resolveProjectName(
+        var project = ComposeFile.resolveProjectName(explicit: projectName, projectDir: projectDir)
+        var composeFile = try parse(withProjectName: project)
+
+        let resolved = ComposeFile.resolveProjectName(
             explicit: projectName,
             composeFileName: composeFile.name,
             projectDir: projectDir
         )
+        if resolved != project {
+            project = resolved
+            // stdin is consumed by the first read, so a piped file keeps the first parse.
+            if !paths.contains("-") {
+                composeFile = try parse(withProjectName: project)
+            }
+        }
 
         return (composeFile, project, projectDir)
     }
