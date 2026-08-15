@@ -348,10 +348,18 @@ struct Create: AsyncParsableCommand {
 
         let restartPolicy = RestartPolicy(rawValue: restart) ?? .no
 
+        // Docker treats `--entrypoint` as shell form: it is split on spaces, the
+        // first token overrides the executable and any remaining tokens lead the
+        // command argv. Apple's `container` CLI only accepts a single token here.
+        let exec = ComposeOrchestrator.resolveExec(
+            entrypoint: entrypoint?.split(separator: " ").map(String.init) ?? [],
+            command: command
+        )
+
         let containerConfig = ContainerConfig(
             name: name,
             image: image,
-            command: command,
+            command: exec.command,
             environment: environment,
             ports: ports,
             volumes: volumes,
@@ -364,7 +372,7 @@ struct Create: AsyncParsableCommand {
             hostname: hostname,
             restartPolicy: restartPolicy,
             user: user,
-            entrypoint: entrypoint,
+            entrypoint: exec.entrypoint,
             platform: platform,
             virtualization: virtualization,
             kernel: kernel,

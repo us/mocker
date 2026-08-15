@@ -157,6 +157,45 @@ struct ComposeOrchestratorTests {
         #expect(!ComposeService.imageMatches(img, tag: "other-app:latest"))
     }
 
+    // MARK: - Entrypoint resolution (compose `entrypoint:` support)
+
+    @Test("Empty entrypoint leaves command untouched")
+    func resolveExecNoEntrypoint() {
+        let exec = ComposeOrchestrator.resolveExec(entrypoint: [], command: ["echo", "hi"])
+        #expect(exec.entrypoint == nil)
+        #expect(exec.command == ["echo", "hi"])
+    }
+
+    @Test("Entrypoint with args: first element is the executable, rest lead the argv")
+    func resolveExecSplicesEntrypointArgs() {
+        let exec = ComposeOrchestrator.resolveExec(
+            entrypoint: ["/bin/sh", "-c"],
+            command: ["echo", "hello"]
+        )
+        #expect(exec.entrypoint == "/bin/sh")
+        #expect(exec.command == ["-c", "echo", "hello"])
+    }
+
+    @Test("Single-element entrypoint overrides executable, keeps command argv")
+    func resolveExecSingleElement() {
+        let exec = ComposeOrchestrator.resolveExec(
+            entrypoint: ["/bin/echo"],
+            command: ["hello"]
+        )
+        #expect(exec.entrypoint == "/bin/echo")
+        #expect(exec.command == ["hello"])
+    }
+
+    @Test("Entrypoint with empty first element is treated as absent")
+    func resolveExecEmptyFirstElement() {
+        let exec = ComposeOrchestrator.resolveExec(
+            entrypoint: [""],
+            command: ["echo", "hi"]
+        )
+        #expect(exec.entrypoint == nil)
+        #expect(exec.command == ["echo", "hi"])
+    }
+
     // MARK: - Volume mount resolution (issue #49)
 
     @Test("Absolute bind mount included as-is")

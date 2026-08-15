@@ -24,6 +24,62 @@ struct ComposeFileTests {
         #expect(compose.services["redis"]?.image == "redis:7")
     }
 
+    @Test("Parse entrypoint in list form")
+    func parseEntrypointList() throws {
+        let compose = try ComposeFile.parse("""
+        services:
+          app:
+            image: alpine:latest
+            entrypoint:
+              - /bin/sh
+              - -c
+            command:
+              - echo hello
+        """)
+        #expect(compose.services["app"]?.entrypoint == ["/bin/sh", "-c"])
+        #expect(compose.services["app"]?.command == ["echo hello"])
+    }
+
+    @Test("Parse entrypoint in shell/string form, split on spaces")
+    func parseEntrypointString() throws {
+        let compose = try ComposeFile.parse("""
+        services:
+          app:
+            image: alpine:latest
+            entrypoint: /bin/sh -c
+            command: echo hello
+        """)
+        #expect(compose.services["app"]?.entrypoint == ["/bin/sh", "-c"])
+        #expect(compose.services["app"]?.command == ["echo", "hello"])
+    }
+
+    @Test("Merge: later file's entrypoint wins; empty entrypoint does not clobber")
+    func mergeEntrypoint() throws {
+        let base = try ComposeFile.parse("""
+        services:
+          app:
+            image: alpine:latest
+            entrypoint:
+              - /bin/sh
+              - -c
+        """)
+        let overlay = try ComposeFile.parse("""
+        services:
+          app:
+            image: alpine:latest
+            entrypoint:
+              - /bin/echo
+        """)
+        let noEntrypoint = try ComposeFile.parse("""
+        services:
+          app:
+            image: alpine:latest
+        """)
+
+        #expect(ComposeFile.merge([base, overlay]).services["app"]?.entrypoint == ["/bin/echo"])
+        #expect(ComposeFile.merge([base, noEntrypoint]).services["app"]?.entrypoint == ["/bin/sh", "-c"])
+    }
+
     @Test("Merge overlays later files over earlier ones")
     func mergeOverlay() throws {
         let base = try ComposeFile.parse("""
@@ -952,6 +1008,29 @@ struct ComposeFileTests {
     }
 
     // MARK: - Config hash (issue #59)
+
+    @Test("ComposeService.hash differs when entrypoint changes")
+    func hashDiffersOnEntrypointChange() throws {
+        let noEntrypoint = try ComposeFile.parse("""
+        services:
+          app:
+            image: alpine:latest
+            command:
+              - echo hi
+        """).services["app"]!
+        let withEntrypoint = try ComposeFile.parse("""
+        services:
+          app:
+            image: alpine:latest
+            entrypoint:
+              - /bin/sh
+              - -c
+            command:
+              - echo hi
+        """).services["app"]!
+
+        #expect(ComposeService.hash(of: noEntrypoint) != ComposeService.hash(of: withEntrypoint))
+    }
 
     @Test("ComposeService.hash returns sha256:<64 hex chars> for a fixed spec")
     func hashReturnsSha256Literal() throws {
