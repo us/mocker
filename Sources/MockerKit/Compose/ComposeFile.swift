@@ -506,6 +506,7 @@ public struct ComposeService: Sendable {
     public var image: String?
     public var build: ComposeBuild?
     public var command: [String]
+    public var entrypoint: [String] = []
     public var environment: [String: String]
     public var ports: [String]
     public var volumes: [String]
@@ -531,7 +532,7 @@ public struct ComposeService: Sendable {
     public var restartPolicyWindow: String?
 
     private enum HashCodingKeys: String, CodingKey {
-        case name, image, command, environment, ports, volumes, networks
+        case name, image, command, entrypoint, environment, ports, volumes, networks
         case restart, labels, hostname, workingDir
         case memLimit, cpus, memReservation, cpusReservation, memSwapLimit
         case shmSize, pidsLimit
@@ -568,6 +569,7 @@ public struct ComposeService: Sendable {
         }
         let dependsOn = parseDependsOn(dict["depends_on"])
         let command = parseCommand(dict["command"])
+        let entrypoint = parseCommand(dict["entrypoint"])
         let labels = (dict["labels"] as? [String: String]) ?? [:]
 
         var build: ComposeBuild?
@@ -617,6 +619,7 @@ public struct ComposeService: Sendable {
             image: dict["image"] as? String,
             build: build,
             command: command,
+            entrypoint: entrypoint,
             environment: environment,
             ports: ports,
             volumes: volumes,
@@ -654,6 +657,7 @@ public struct ComposeService: Sendable {
             image: other.image ?? image,
             build: other.build ?? build,
             command: other.command.isEmpty ? command : other.command,
+            entrypoint: other.entrypoint.isEmpty ? entrypoint : other.entrypoint,
             environment: environment.merging(other.environment) { _, new in new },
             ports: other.ports.isEmpty ? ports : other.ports,
             volumes: other.volumes.isEmpty ? volumes : other.volumes,
@@ -833,6 +837,7 @@ extension ComposeService: Encodable {
         try c.encode(name, forKey: .name)
         try c.encodeIfPresent(image, forKey: .image)
         try c.encode(command, forKey: .command)
+        try c.encode(entrypoint, forKey: .entrypoint)
         try c.encode(environment, forKey: .environment)
         try c.encode(ports, forKey: .ports)
         try c.encode(volumes, forKey: .volumes)

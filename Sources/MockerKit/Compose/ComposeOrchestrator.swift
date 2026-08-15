@@ -548,10 +548,17 @@ public actor ComposeOrchestrator {
             }
         )
 
+        // Docker's exec model concatenates entrypoint + command into one argv.
+        // Apple's `container` CLI can only override the executable
+        // (`--entrypoint <cmd>`, a single token, no args), so the first
+        // entrypoint element is used as the executable and any remaining
+        // elements are spliced ahead of the command args.
+        let exec = Self.resolveExec(entrypoint: service.entrypoint, command: service.command)
+
         let config = ContainerConfig(
             name: containerName,
             image: imageName,
-            command: service.command,
+            command: exec.command,
             environment: service.environment,
             ports: ports,
             volumes: volumes,
@@ -571,11 +578,12 @@ public actor ComposeOrchestrator {
             ) { _, new in new },
             workingDir: service.workingDir,
             hostname: service.hostname,
+            restartPolicy: service.restart.flatMap { RestartPolicy(rawValue: $0) } ?? .no,
+            entrypoint: exec.entrypoint,
             // `restartPolicy` and `shmSize` (like the soft mem/cpu reservations) are stored on the
             // config for Docker surface parity, mirroring `run`/`create`. Apple's `container` CLI
             // currently exposes no `--restart`/`--shm-size` flags, so these are NOT enforced by the
             // runtime today — only `memory` (-m) and `cpus` (-c) are actually emitted.
-            restartPolicy: service.restart.flatMap { RestartPolicy(rawValue: $0) } ?? .no,
             shmSize: service.shmSize,
             memory: service.memLimit,
             cpus: service.cpus
@@ -621,6 +629,25 @@ public actor ComposeOrchestrator {
             }
         }
         return volumes
+    }
+
+    /// Mirror Docker's exec model for a compose service: the effective argv is the
+    /// entrypoint array concatenated with the command array.
+    ///
+    /// Apple's `container` CLI can only override the entrypoint executable via
+    /// `--entrypoint <cmd>` — a single token with no args (a value like
+    /// `/bin/sh -c` is treated as one executable path and fails to launch).
+    /// So the first entrypoint element becomes the executable and any remaining
+    /// elements are spliced ahead of the command args, preserving Docker's
+    /// `ENTRYPOINT [...] + CMD [...]` semantics.
+    public nonisolated static func resolveExec(
+        entrypoint: [String],
+        command: [String]
+    ) -> (entrypoint: String?, command: [String]) {
+        guard let first = entrypoint.first, !first.isEmpty else {
+            return (nil, command)
+        }
+        return (first, Array(entrypoint.dropFirst()) + command)
     }
 }
 extension ComposeOrchestrator {
