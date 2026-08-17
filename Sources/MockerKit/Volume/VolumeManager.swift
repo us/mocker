@@ -28,6 +28,11 @@ public actor VolumeManager {
         }
     }
 
+    /// Root directory where volume data lives (`<dataRoot>/volumes`). Every named
+    /// volume is stored under `<mountpointPath>/<name>/_data`, which is what compose
+    /// bind-mounts into containers so named volumes survive container recreation.
+    public nonisolated var mountpointPath: String { storagePath }
+
     /// Reject names that would escape the volumes directory. Every volume path is
     /// built by interpolating the name, and a compose file can supply it verbatim
     /// (`volumes: {data: {name: ...}}`), so `../` must never get through.

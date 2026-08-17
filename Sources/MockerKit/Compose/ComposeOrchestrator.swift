@@ -523,7 +523,13 @@ public actor ComposeOrchestrator {
         // Parse port mappings
         let ports = try service.ports.map { try PortMapping.parse($0) }
 
-        let volumes = try Self.resolveVolumeMounts(service.volumes, projectDir: projectDir)
+        let volumes = try Self.resolveVolumeMounts(
+            service.volumes,
+            projectDir: projectDir,
+            projectName: projectName,
+            declaredVolumes: composeFile.volumes,
+            volumesPath: volumeManager.mountpointPath
+        )
 
         let config = ContainerConfig(
             name: containerName,
@@ -563,33 +569,53 @@ public actor ComposeOrchestrator {
 
     /// Resolve volume spec strings from a compose service into `VolumeMount` values.
     ///
-    /// Bind-mount host paths (absolute or relative) are included; anonymous volumes
-    /// (container paths only) are included; named volumes (bare names without path
-    /// separators) are skipped — Apple's virtiofs doesn't support chown from within
-    /// containers, which breaks images like postgres that chown their data directory
-    /// on init.
+    /// Bind-mount host paths (absolute, relative or `~`-anchored) and anonymous
+    /// volumes (container paths only) are included as-is. Named volumes are
+    /// resolved to their backing directory under `volumesPath`
+    /// (`<volumesPath>/<runtimeName>/_data`, where `runtimeName` applies the
+    /// project prefix unless the volume declares an explicit `name:` or is
+    /// `external:`), and bind-mounted — exactly what Docker does internally, and
+    /// what keeps the data alive across `compose up --force-recreate`.
     ///
     /// Relative paths (`./foo`, `../bar`, `data/dir`) are resolved to absolute paths
     /// against `projectDir` (the Compose `--project-directory`, i.e. the directory
     /// containing the compose file unless overridden). This matches Docker Compose
     /// behaviour, where bind-mount sources are anchored to the project directory
     /// rather than the process's current working directory.
-    static func resolveVolumeMounts(_ volSpecs: [String], projectDir: URL) throws -> [VolumeMount] {
+    static func resolveVolumeMounts(
+        _ volSpecs: [String],
+        projectDir: URL,
+        projectName: String,
+        declaredVolumes: [String: ComposeVolume],
+        volumesPath: String
+    ) throws -> [VolumeMount] {
         var volumes: [VolumeMount] = []
         for volSpec in volSpecs {
             var mount = try VolumeMount.parse(volSpec)
             if mount.source.isEmpty {
+                // Anonymous volume: just a container path.
                 volumes.append(mount)
             } else if mount.source.hasPrefix("/") {
+                // Absolute bind mount.
                 volumes.append(mount)
             } else if mount.source.hasPrefix("~") {
+                // Home-relative bind mount.
                 mount.source = (mount.source as NSString).expandingTildeInPath
                 volumes.append(mount)
             } else if mount.source.hasPrefix(".")
                       || mount.source.contains("/") {
+                // Relative bind mount, anchored to the project directory.
                 mount.source = projectDir.appendingPathComponent(mount.source).standardized.path
                 volumes.append(mount)
+            } else if let declared = declaredVolumes[mount.source] {
+                // Named volume: bind-mount the volume's backing directory so the
+                // data survives container recreation (issue #XX).
+                let runtimeName = declared.runtimeName(projectName: projectName)
+                mount.source = "\(volumesPath)/\(runtimeName)/_data"
+                volumes.append(mount)
             }
+            // Anything else (e.g. an undeclared bare name) is silently dropped,
+            // matching the previous behaviour for non-declared names.
         }
         return volumes
     }
