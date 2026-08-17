@@ -161,7 +161,7 @@ struct ComposeOrchestratorTests {
 
     @Test("Absolute bind mount included as-is")
     func resolveAbsoluteBindMount() throws {
-        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["/host/data:/container/data"], projectDir: Self.cwd)
+        let mounts = try Self.resolve(["/host/data:/container/data"])
         #expect(mounts.count == 1)
         #expect(mounts[0].source == "/host/data")
         #expect(mounts[0].destination == "/container/data")
@@ -176,22 +176,48 @@ struct ComposeOrchestratorTests {
         ]
     )
     func resolveRelativeStyleMounts(spec: String, suffix: String, destination: String) throws {
-        let mounts = try ComposeOrchestrator.resolveVolumeMounts([spec], projectDir: Self.cwd)
+        let mounts = try Self.resolve([spec])
         #expect(mounts.count == 1)
         #expect(mounts[0].source.hasPrefix("/"))
         #expect(mounts[0].source.hasSuffix(suffix))
         #expect(mounts[0].destination == destination)
     }
 
-    @Test("Named volume skipped")
-    func skipNamedVolume() throws {
-        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["mydata:/container/data"], projectDir: Self.cwd)
+    @Test("Declared named volume resolved to its backing directory")
+    func resolveDeclaredNamedVolume() throws {
+        let mounts = try Self.resolve(["mydata:/container/data"], declared: ["mydata"])
+        #expect(mounts.count == 1)
+        #expect(mounts[0].source == "/volumes/proj-mydata/_data")
+        #expect(mounts[0].destination == "/container/data")
+    }
+
+    @Test("Named volume with explicit name uses it verbatim")
+    func resolveNamedVolumeCustomName() throws {
+        let vol = ComposeVolume(name: "mydata", customName: "shared-data")
+        let mounts = try Self.resolve(["mydata:/container/data"], declaredVolumes: ["mydata": vol])
+        #expect(mounts.count == 1)
+        #expect(mounts[0].source == "/volumes/shared-data/_data")
+        #expect(mounts[0].destination == "/container/data")
+    }
+
+    @Test("External named volume keeps its declared key")
+    func resolveExternalNamedVolume() throws {
+        let vol = ComposeVolume(name: "mydata", external: true)
+        let mounts = try Self.resolve(["mydata:/container/data"], declaredVolumes: ["mydata": vol])
+        #expect(mounts.count == 1)
+        #expect(mounts[0].source == "/volumes/mydata/_data")
+        #expect(mounts[0].destination == "/container/data")
+    }
+
+    @Test("Undeclared bare name is dropped")
+    func dropUndeclaredName() throws {
+        let mounts = try Self.resolve(["mydata:/container/data"])
         #expect(mounts.isEmpty)
     }
 
     @Test("Anonymous volume included")
     func includeAnonymousVolume() throws {
-        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["/container/data"], projectDir: Self.cwd)
+        let mounts = try Self.resolve(["/container/data"])
         #expect(mounts.count == 1)
         #expect(mounts[0].source == "")
         #expect(mounts[0].destination == "/container/data")
@@ -199,16 +225,17 @@ struct ComposeOrchestratorTests {
 
     @Test("Mix of bind mounts, named volumes, and anonymous volumes")
     func resolveMixedVolumes() throws {
-        let mounts = try ComposeOrchestrator.resolveVolumeMounts([
+        let mounts = try Self.resolve([
             "/abs/path:/app/data",
             "./relative:/app/rel",
             "namedvol:/app/named",
             "/app/anon",
             "sub/dir:/app/sub",
-        ], projectDir: Self.cwd)
-        #expect(mounts.count == 4)  // namedvol skipped
+        ], declared: ["namedvol"])
+        #expect(mounts.count == 5)
         let sources = mounts.map(\.source)
         #expect(sources.contains("/abs/path"))
+        #expect(sources.contains("/volumes/proj-namedvol/_data"))
         #expect(sources.contains(""))  // anonymous
         #expect(sources.contains(where: { $0.hasSuffix("/relative") }))
         #expect(sources.contains(where: { $0.hasSuffix("sub/dir") }))
@@ -216,7 +243,7 @@ struct ComposeOrchestratorTests {
 
     @Test("Read-only relative bind mount preserves ro flag")
     func resolveRelativeReadOnly() throws {
-        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["./data:/container/data:ro"], projectDir: Self.cwd)
+        let mounts = try Self.resolve(["./data:/container/data:ro"])
         #expect(mounts.count == 1)
         #expect(mounts[0].readOnly == true)
         #expect(mounts[0].destination == "/container/data")
@@ -225,11 +252,37 @@ struct ComposeOrchestratorTests {
 
     @Test("Home-relative path resolved")
     func resolveHomeRelativePath() throws {
-        let mounts = try ComposeOrchestrator.resolveVolumeMounts(["~/data:/container/data"], projectDir: Self.cwd)
+        let mounts = try Self.resolve(["~/data:/container/data"])
         #expect(mounts.count == 1)
         #expect(mounts[0].source.hasPrefix("/"))
         #expect(mounts[0].source.contains("data"))
         #expect(mounts[0].destination == "/container/data")
+    }
+
+    /// Convenience wrapper: resolve specs with a fixed project name/volumes path
+    /// and no declared volumes.
+    private static func resolve(
+        _ specs: [String],
+        declared declaredKeys: [String] = []
+    ) throws -> [VolumeMount] {
+        let declared = Dictionary(uniqueKeysWithValues: declaredKeys.map {
+            ($0, ComposeVolume(name: $0))
+        })
+        return try resolve(specs, declaredVolumes: declared)
+    }
+
+    /// Convenience wrapper with an explicit volume declaration map.
+    private static func resolve(
+        _ specs: [String],
+        declaredVolumes: [String: ComposeVolume]
+    ) throws -> [VolumeMount] {
+        try ComposeOrchestrator.resolveVolumeMounts(
+            specs,
+            projectDir: Self.cwd,
+            projectName: "proj",
+            declaredVolumes: declaredVolumes,
+            volumesPath: "/volumes"
+        )
     }
 
     // MARK: - reconcileDecision (issue #59)
@@ -488,7 +541,10 @@ struct ComposeOrchestratorTests {
         let projectDir = URL(fileURLWithPath: "/tmp/mocker-issue-60-project")
         let mounts = try ComposeOrchestrator.resolveVolumeMounts(
             ["./data:/container/data"],
-            projectDir: projectDir
+            projectDir: projectDir,
+            projectName: "proj",
+            declaredVolumes: [:],
+            volumesPath: "/volumes"
         )
         #expect(mounts.count == 1)
         #expect(mounts[0].source == "/tmp/mocker-issue-60-project/data")
@@ -500,7 +556,10 @@ struct ComposeOrchestratorTests {
         let projectDir = URL(fileURLWithPath: "/tmp/mocker-issue-60-project/nested")
         let mounts = try ComposeOrchestrator.resolveVolumeMounts(
             ["../shared:/container/shared"],
-            projectDir: projectDir
+            projectDir: projectDir,
+            projectName: "proj",
+            declaredVolumes: [:],
+            volumesPath: "/volumes"
         )
         #expect(mounts.count == 1)
         #expect(mounts[0].source == "/tmp/mocker-issue-60-project/shared")
