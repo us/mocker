@@ -81,6 +81,21 @@ public actor ComposeOrchestrator {
             }
         }
 
+        // Named volumes are bind-mounted from their backing directory, so both an
+        // unusable name and a missing external volume have to fail here — before any
+        // service starts — rather than as a raw runtime path error half-way through.
+        if !composeFile.volumes.isEmpty {
+            let existing = Set(await volumeManager.list().map(\.name))
+            for volume in composeFile.volumes.values {
+                let name = volume.runtimeName(projectName: projectName)
+                _ = try volumeManager.mountpoint(name)
+                guard !volume.external || existing.contains(name) else {
+                    throw MockerError.operationFailed(
+                        "volume \(name) declared as external, but could not be found")
+                }
+            }
+        }
+
         // Create networks
         for (fullName, driver) in Self.networksToCreate(composeFile: composeFile, projectName: projectName) {
             do {
@@ -523,12 +538,14 @@ public actor ComposeOrchestrator {
         // Parse port mappings
         let ports = try service.ports.map { try PortMapping.parse($0) }
 
+        // Named volumes bind-mount their backing directory, exactly as Docker does
+        // internally, so the data survives container recreation.
         let volumes = try Self.resolveVolumeMounts(
             service.volumes,
             projectDir: projectDir,
-            projectName: projectName,
-            declaredVolumes: composeFile.volumes,
-            volumesPath: volumeManager.mountpointPath
+            namedVolumeSources: composeFile.volumes.mapValues {
+                try volumeManager.mountpoint($0.runtimeName(projectName: projectName))
+            }
         )
 
         let config = ContainerConfig(
@@ -569,13 +586,11 @@ public actor ComposeOrchestrator {
 
     /// Resolve volume spec strings from a compose service into `VolumeMount` values.
     ///
-    /// Bind-mount host paths (absolute, relative or `~`-anchored) and anonymous
-    /// volumes (container paths only) are included as-is. Named volumes are
-    /// resolved to their backing directory under `volumesPath`
-    /// (`<volumesPath>/<runtimeName>/_data`, where `runtimeName` applies the
-    /// project prefix unless the volume declares an explicit `name:` or is
-    /// `external:`), and bind-mounted — exactly what Docker does internally, and
-    /// what keeps the data alive across `compose up --force-recreate`.
+    /// Bind-mount host paths and anonymous volumes (container paths only) are
+    /// included as-is. A name declared in the file's top-level `volumes:` section is
+    /// bind-mounted from its backing directory (`namedVolumeSources`), which is what
+    /// keeps the data alive across `compose up --force-recreate`; an undeclared bare
+    /// name has no backing directory and is dropped.
     ///
     /// Relative paths (`./foo`, `../bar`, `data/dir`) are resolved to absolute paths
     /// against `projectDir` (the Compose `--project-directory`, i.e. the directory
@@ -585,21 +600,14 @@ public actor ComposeOrchestrator {
     static func resolveVolumeMounts(
         _ volSpecs: [String],
         projectDir: URL,
-        projectName: String,
-        declaredVolumes: [String: ComposeVolume],
-        volumesPath: String
+        namedVolumeSources: [String: String]
     ) throws -> [VolumeMount] {
         var volumes: [VolumeMount] = []
         for volSpec in volSpecs {
             var mount = try VolumeMount.parse(volSpec)
-            if mount.source.isEmpty {
-                // Anonymous volume: just a container path.
-                volumes.append(mount)
-            } else if mount.source.hasPrefix("/") {
-                // Absolute bind mount.
+            if mount.source.isEmpty || mount.source.hasPrefix("/") {
                 volumes.append(mount)
             } else if mount.source.hasPrefix("~") {
-                // Home-relative bind mount.
                 mount.source = (mount.source as NSString).expandingTildeInPath
                 volumes.append(mount)
             } else if mount.source.hasPrefix(".")
@@ -607,15 +615,10 @@ public actor ComposeOrchestrator {
                 // Relative bind mount, anchored to the project directory.
                 mount.source = projectDir.appendingPathComponent(mount.source).standardized.path
                 volumes.append(mount)
-            } else if let declared = declaredVolumes[mount.source] {
-                // Named volume: bind-mount the volume's backing directory so the
-                // data survives container recreation (issue #XX).
-                let runtimeName = declared.runtimeName(projectName: projectName)
-                mount.source = "\(volumesPath)/\(runtimeName)/_data"
+            } else if let source = namedVolumeSources[mount.source] {
+                mount.source = source
                 volumes.append(mount)
             }
-            // Anything else (e.g. an undeclared bare name) is silently dropped,
-            // matching the previous behaviour for non-declared names.
         }
         return volumes
     }

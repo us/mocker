@@ -185,27 +185,9 @@ struct ComposeOrchestratorTests {
 
     @Test("Declared named volume resolved to its backing directory")
     func resolveDeclaredNamedVolume() throws {
-        let mounts = try Self.resolve(["mydata:/container/data"], declared: ["mydata"])
+        let mounts = try Self.resolve(["mydata:/container/data"], named: ["mydata": "/volumes/proj-mydata/_data"])
         #expect(mounts.count == 1)
         #expect(mounts[0].source == "/volumes/proj-mydata/_data")
-        #expect(mounts[0].destination == "/container/data")
-    }
-
-    @Test("Named volume with explicit name uses it verbatim")
-    func resolveNamedVolumeCustomName() throws {
-        let vol = ComposeVolume(name: "mydata", customName: "shared-data")
-        let mounts = try Self.resolve(["mydata:/container/data"], declaredVolumes: ["mydata": vol])
-        #expect(mounts.count == 1)
-        #expect(mounts[0].source == "/volumes/shared-data/_data")
-        #expect(mounts[0].destination == "/container/data")
-    }
-
-    @Test("External named volume keeps its declared key")
-    func resolveExternalNamedVolume() throws {
-        let vol = ComposeVolume(name: "mydata", external: true)
-        let mounts = try Self.resolve(["mydata:/container/data"], declaredVolumes: ["mydata": vol])
-        #expect(mounts.count == 1)
-        #expect(mounts[0].source == "/volumes/mydata/_data")
         #expect(mounts[0].destination == "/container/data")
     }
 
@@ -231,7 +213,7 @@ struct ComposeOrchestratorTests {
             "namedvol:/app/named",
             "/app/anon",
             "sub/dir:/app/sub",
-        ], declared: ["namedvol"])
+        ], named: ["namedvol": "/volumes/proj-namedvol/_data"])
         #expect(mounts.count == 5)
         let sources = mounts.map(\.source)
         #expect(sources.contains("/abs/path"))
@@ -259,29 +241,16 @@ struct ComposeOrchestratorTests {
         #expect(mounts[0].destination == "/container/data")
     }
 
-    /// Convenience wrapper: resolve specs with a fixed project name/volumes path
-    /// and no declared volumes.
+    /// Resolve specs against the test project directory, with named volumes already
+    /// mapped to their backing directories.
     private static func resolve(
         _ specs: [String],
-        declared declaredKeys: [String] = []
-    ) throws -> [VolumeMount] {
-        let declared = Dictionary(uniqueKeysWithValues: declaredKeys.map {
-            ($0, ComposeVolume(name: $0))
-        })
-        return try resolve(specs, declaredVolumes: declared)
-    }
-
-    /// Convenience wrapper with an explicit volume declaration map.
-    private static func resolve(
-        _ specs: [String],
-        declaredVolumes: [String: ComposeVolume]
+        named: [String: String] = [:]
     ) throws -> [VolumeMount] {
         try ComposeOrchestrator.resolveVolumeMounts(
             specs,
             projectDir: Self.cwd,
-            projectName: "proj",
-            declaredVolumes: declaredVolumes,
-            volumesPath: "/volumes"
+            namedVolumeSources: named
         )
     }
 
@@ -542,9 +511,7 @@ struct ComposeOrchestratorTests {
         let mounts = try ComposeOrchestrator.resolveVolumeMounts(
             ["./data:/container/data"],
             projectDir: projectDir,
-            projectName: "proj",
-            declaredVolumes: [:],
-            volumesPath: "/volumes"
+            namedVolumeSources: [:]
         )
         #expect(mounts.count == 1)
         #expect(mounts[0].source == "/tmp/mocker-issue-60-project/data")
@@ -557,9 +524,7 @@ struct ComposeOrchestratorTests {
         let mounts = try ComposeOrchestrator.resolveVolumeMounts(
             ["../shared:/container/shared"],
             projectDir: projectDir,
-            projectName: "proj",
-            declaredVolumes: [:],
-            volumesPath: "/volumes"
+            namedVolumeSources: [:]
         )
         #expect(mounts.count == 1)
         #expect(mounts[0].source == "/tmp/mocker-issue-60-project/shared")
