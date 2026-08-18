@@ -94,7 +94,7 @@ struct ComposeVolumeLifecycleTests {
     }
 
     @Test("Volume names that would escape the volumes directory are rejected", arguments: [
-        "../etc", "a/b", "..", ".", "",
+        "../etc", "a/b", "..", ".", "", "host:path",
     ])
     func rejectsEscapingVolumeNames(name: String) {
         #expect(throws: MockerError.self) {

@@ -28,19 +28,23 @@ public actor VolumeManager {
         }
     }
 
-    /// Root directory where volume data lives (`<dataRoot>/volumes`). Every named
-    /// volume is stored under `<mountpointPath>/<name>/_data`, which is what compose
-    /// bind-mounts into containers so named volumes survive container recreation.
-    public nonisolated var mountpointPath: String { storagePath }
+    /// Backing directory holding a volume's data. Compose bind-mounts it so named
+    /// volumes survive container recreation.
+    public nonisolated func mountpoint(_ name: String) throws -> String {
+        try Self.validateName(name)
+        return "\(storagePath)/\(name)/_data"
+    }
 
     /// Reject names that would escape the volumes directory. Every volume path is
     /// built by interpolating the name, and a compose file can supply it verbatim
     /// (`volumes: {data: {name: ...}}`), so `../` must never get through.
     static func validateName(_ name: String) throws {
-        // Only path escape is rejected — anything else stays removable, including
-        // volumes created before this check existed.
+        // Path escape and `:` are rejected — the latter because the backing directory
+        // goes into a `-v source:destination` argument, where it would misparse.
+        // Anything else stays removable, including volumes created before this check.
         let valid = !name.isEmpty
             && !name.contains("/")
+            && !name.contains(":")
             && name != "."
             && name != ".."
         guard valid else {
@@ -50,12 +54,11 @@ public actor VolumeManager {
 
     /// Create a new volume.
     public func create(name: String, driver: String = "local", labels: [String: String] = [:]) throws -> VolumeInfo {
-        try Self.validateName(name)
         guard volumes[name] == nil else {
             throw MockerError.operationFailed("Volume \(name) already exists")
         }
 
-        let mountpoint = "\(config.volumesPath)/\(name)/_data"
+        let mountpoint = try mountpoint(name)
         let fm = FileManager.default
         if !fm.fileExists(atPath: mountpoint) {
             try fm.createDirectory(atPath: mountpoint, withIntermediateDirectories: true)

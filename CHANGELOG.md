@@ -12,10 +12,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **image inspect:** `mocker image inspect` and `mocker inspect --type=image` now return Docker-compatible `ImageInspect` JSON arrays with PascalCase keys instead of the previous lowercase `ImageInfo` object shape.
 * **MockerKit:** `ImageManager.inspect(_:platform:)` returns `ImageInspect` instead of `ImageInfo`.
 
-### Bug Fixes
-
-* **compose:** named volumes are now mounted into containers, so their data survives `compose up --force-recreate` instead of silently living in the container layer and being discarded. Volumes resolve to their backing directory under the volume store (`<volumesPath>/<runtimeName>/_data`), matching Docker's behaviour; `down --volumes` still removes them.
-
 ## [0.9.1](https://github.com/us/mocker/compare/v0.9.0...v0.9.1) (2026-08-09)
 
 
