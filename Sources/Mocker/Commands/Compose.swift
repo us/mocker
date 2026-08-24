@@ -1054,21 +1054,13 @@ struct ComposeRun: AsyncParsableCommand {
             environment[String(parts[0])] = String(parts[1])
         }
 
-        // Docker treats `--entrypoint` as shell form: it is split on spaces, the
-        // first token overrides the executable and any remaining tokens lead the
-        // command argv. Apple's `container` CLI only accepts a single token here.
-        let exec = ComposeOrchestrator.resolveExec(
-            entrypoint: entrypoint?.split(separator: " ").map(String.init) ?? [],
-            command: command
-        )
-
         let containerConfig = ContainerConfig(
             image: image,
-            command: exec.command,
+            command: command,
             environment: environment,
             detach: detach,
             workingDir: workdir,
-            entrypoint: exec.entrypoint
+            entrypoint: entrypoint
         )
 
         let container = try await engine.run(containerConfig)
