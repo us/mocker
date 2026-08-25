@@ -12,6 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **image inspect:** `mocker image inspect` and `mocker inspect --type=image` now return Docker-compatible `ImageInspect` JSON arrays with PascalCase keys instead of the previous lowercase `ImageInfo` object shape.
 * **MockerKit:** `ImageManager.inspect(_:platform:)` returns `ImageInspect` instead of `ImageInfo`.
 
+## [0.9.4](https://github.com/us/mocker/compare/v0.9.3...v0.9.4) (2026-08-25)
+
+
+### Bug Fixes
+
+* **inspect:** report the applied memory limit in HostConfig ([cf68e47](https://github.com/us/mocker/commit/cf68e47c61f993d15b9eefc8a2cd273272d57b3c))
+
 ## [0.9.3](https://github.com/us/mocker/compare/v0.9.2...v0.9.3) (2026-08-24)
 
 
