@@ -14,6 +14,9 @@ public struct ContainerInfo: Codable, Sendable, Identifiable {
     public var pid: Int?
     /// Container IP address assigned by vmnet (Apple Containerization).
     public var networkAddress: String
+    /// Memory limit in bytes reported by the runtime (`configuration.resources.memoryInBytes`).
+    /// `nil` when the container has no explicit limit (runtime default).
+    public var memoryBytes: UInt64?
 
     public init(
         id: String,
@@ -26,7 +29,8 @@ public struct ContainerInfo: Codable, Sendable, Identifiable {
         labels: [String: String] = [:],
         command: String = "",
         pid: Int? = nil,
-        networkAddress: String = ""
+        networkAddress: String = "",
+        memoryBytes: UInt64? = nil
     ) {
         self.id = id
         self.name = name
@@ -39,6 +43,7 @@ public struct ContainerInfo: Codable, Sendable, Identifiable {
         self.command = command
         self.pid = pid
         self.networkAddress = networkAddress
+        self.memoryBytes = memoryBytes
     }
 
     /// Short ID (first 12 characters).

@@ -95,4 +95,32 @@ struct ContainerInspectMappingTests {
         #expect(json.contains("\"80/tcp\""))
         #expect(!json.contains("\"status\""))  // not the internal lowercase shape
     }
+
+    // MARK: - HostConfig
+
+    @Test("HostConfig.Memory mirrors the applied limit; 0 when none (Docker parity)")
+    func hostConfigMemory() {
+        var info = sampleInfo()
+        info.memoryBytes = 4_294_967_296
+        let limited = mapToContainerInspect(info)
+        #expect(limited.hostConfig.memory == 4_294_967_296)
+        #expect(limited.hostConfig.networkMode == "default")
+
+        info.memoryBytes = nil
+        let unlimited = mapToContainerInspect(info)
+        #expect(unlimited.hostConfig.memory == 0)
+        #expect(unlimited.hostConfig.networkMode == "default")
+    }
+
+    @Test("HostConfig serializes with Docker PascalCase keys")
+    func hostConfigJsonShape() throws {
+        var info = sampleInfo()
+        info.memoryBytes = 4_294_967_296
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let json = String(data: try encoder.encode(mapToContainerInspect(info)), encoding: .utf8)!
+        #expect(json.contains("\"HostConfig\":"))
+        #expect(json.contains("\"Memory\":4294967296"))
+        #expect(json.contains("\"NetworkMode\":\"default\""))
+    }
 }

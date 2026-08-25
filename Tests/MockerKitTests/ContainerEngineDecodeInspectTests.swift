@@ -15,7 +15,8 @@ struct ContainerEngineDecodeInspectTests {
         state: String? = "running",
         ipv4Address: String? = "10.0.0.1/24",
         networks: [[String: Any]]? = nil,
-        configID: String = "abc123def456ghi"
+        configID: String = "abc123def456ghi",
+        memoryInBytes: Int? = nil
     ) -> [String: Any] {
         var statusObj: [String: Any] = [:]
         if let state { statusObj["state"] = state }
@@ -28,8 +29,12 @@ struct ContainerEngineDecodeInspectTests {
             nets = []
         }
         statusObj["networks"] = nets
+        var configuration: [String: Any] = ["id": configID]
+        if let memoryInBytes {
+            configuration["resources"] = ["memoryInBytes": memoryInBytes]
+        }
         return [
-            "configuration": ["id": configID] as [String: Any],
+            "configuration": configuration,
             "status": statusObj
         ]
     }
@@ -146,5 +151,21 @@ struct ContainerEngineDecodeInspectTests {
         // ContainerState.exited.displayString — if the constant ever drifts
         // back to "Exited (0)" or similar, both paths regress.
         #expect(ContainerState.exited.displayString == "Exited")
+    }
+
+    // MARK: - Memory limit
+
+    @Test("decodeInspect with resources.memoryInBytes surfaces the applied limit")
+    func decodeInspect_withMemoryLimit_surfacesMemoryBytes() {
+        let dict = makeDict(state: "running", memoryInBytes: 4_294_967_296) // 4 GiB
+        let result = ContainerEngine.decodeInspect(dict, id: "id1", name: "ctn", config: makeConfig())
+        #expect(result?.memoryBytes == 4_294_967_296)
+    }
+
+    @Test("decodeInspect without resources reports nil memory (runtime default)")
+    func decodeInspect_withoutMemoryLimit_reportsNil() {
+        let dict = makeDict(state: "running", memoryInBytes: nil)
+        let result = ContainerEngine.decodeInspect(dict, id: "id1", name: "ctn", config: makeConfig())
+        #expect(result?.memoryBytes == nil)
     }
 }

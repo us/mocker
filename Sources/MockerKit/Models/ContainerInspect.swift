@@ -6,7 +6,7 @@ import Foundation
 /// Serializes with Docker PascalCase JSON keys; optional fields are omitted when absent.
 ///
 /// Populated from the data mocker tracks in `ContainerInfo`. Fields that Apple's
-/// Containerization runtime does not surface (HostConfig, Mounts, RestartCount, env,
+/// Containerization runtime does not surface (Mounts, RestartCount, env,
 /// exit code, start/finish timestamps, …) are omitted rather than fabricated.
 public struct ContainerInspect: Codable, Sendable {
     enum CodingKeys: String, CodingKey {
@@ -17,6 +17,7 @@ public struct ContainerInspect: Codable, Sendable {
         case state = "State"
         case config = "Config"
         case networkSettings = "NetworkSettings"
+        case hostConfig = "HostConfig"
     }
 
     public let id: String
@@ -28,6 +29,7 @@ public struct ContainerInspect: Codable, Sendable {
     public let state: ContainerInspectState
     public let config: ContainerInspectConfig
     public let networkSettings: ContainerInspectNetworkSettings
+    public let hostConfig: ContainerInspectHostConfig
 
     public init(
         id: String,
@@ -36,7 +38,8 @@ public struct ContainerInspect: Codable, Sendable {
         image: String,
         state: ContainerInspectState,
         config: ContainerInspectConfig,
-        networkSettings: ContainerInspectNetworkSettings
+        networkSettings: ContainerInspectNetworkSettings,
+        hostConfig: ContainerInspectHostConfig
     ) {
         self.id = id
         self.created = created
@@ -45,6 +48,30 @@ public struct ContainerInspect: Codable, Sendable {
         self.state = state
         self.config = config
         self.networkSettings = networkSettings
+        self.hostConfig = hostConfig
+    }
+}
+
+/// Docker-compatible `HostConfig` sub-object.
+///
+/// `Memory` mirrors the limit the runtime actually applied
+/// (`configuration.resources.memoryInBytes`), 0 when the container has no
+/// explicit limit (Docker parity: `Memory` is an int64, 0 = no limit).
+/// `NetworkMode` is always "default": Apple Containerization has no custom
+/// network modes (Docker also emits "default" for the bridge).
+public struct ContainerInspectHostConfig: Codable, Sendable {
+    enum CodingKeys: String, CodingKey {
+        case memory = "Memory"
+        case networkMode = "NetworkMode"
+    }
+
+    /// Memory limit in bytes; 0 when no explicit limit was set.
+    public let memory: Int64
+    public let networkMode: String
+
+    public init(memory: Int64, networkMode: String) {
+        self.memory = memory
+        self.networkMode = networkMode
     }
 }
 
@@ -181,6 +208,11 @@ public func mapToContainerInspect(_ info: ContainerInfo) -> ContainerInspect {
         ports: ports
     )
 
+    let hostConfig = ContainerInspectHostConfig(
+        memory: Int64(info.memoryBytes ?? 0),
+        networkMode: "default"
+    )
+
     return ContainerInspect(
         id: info.id,
         created: rfc3339String(info.created),
@@ -188,7 +220,8 @@ public func mapToContainerInspect(_ info: ContainerInfo) -> ContainerInspect {
         image: info.image,
         state: state,
         config: config,
-        networkSettings: networkSettings
+        networkSettings: networkSettings,
+        hostConfig: hostConfig
     )
 }
 
