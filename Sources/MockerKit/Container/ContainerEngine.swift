@@ -691,6 +691,9 @@ extension ContainerEngine {
         let networks = (statusObj?["networks"] as? [[String: Any]]) ?? []
         let rawAddr = (networks.first?["ipv4Address"] as? String) ?? ""
         let addr = rawAddr.split(separator: "/").first.map(String.init) ?? rawAddr
+        // Memory limit: Apple's inspect reports it under `configuration.resources.memoryInBytes`
+        // (only when the container was created with an explicit limit).
+        let memoryBytes = ((cfg["resources"] as? [String: Any])?["memoryInBytes"] as? NSNumber)?.uint64Value
         return ContainerInfo(
             id: (cfg["id"] as? String) ?? id,
             name: name,
@@ -701,7 +704,8 @@ extension ContainerEngine {
             ports: config.ports,
             labels: config.labels,
             command: config.command.joined(separator: " "),
-            networkAddress: addr
+            networkAddress: addr,
+            memoryBytes: memoryBytes
         )
     }
 }
