@@ -433,3 +433,29 @@ private final class RootedFileManager: FileManager, @unchecked Sendable {
     }
 
 }
+
+/// The store records what mocker last did; after a runtime restart it still said
+/// "running", so `mocker start` returned success without starting anything.
+@Suite("ContainerEngine live state")
+struct ContainerEngineLiveStateTests {
+    private func container(_ state: ContainerState) -> ContainerInfo {
+        ContainerInfo(id: "abc123", name: "web", image: "redis:7", state: state, status: "", created: Date())
+    }
+
+    @Test("A stored running container the runtime no longer runs reads as exited")
+    func staleRunningBecomesExited() {
+        #expect(ContainerEngine.reconciled(container(.running), liveIDs: []).state == .exited)
+    }
+
+    @Test("A container the runtime runs reads as running whatever the store says")
+    func liveContainerIsRunning() {
+        #expect(ContainerEngine.reconciled(container(.exited), liveIDs: ["web"]).state == .running)
+        #expect(ContainerEngine.reconciled(container(.created), liveIDs: ["abc123"]).state == .running)
+    }
+
+    @Test("The listing's header line is not taken for a container")
+    func parsesListing() {
+        let output = "ID   IMAGE  OS\nweb  redis  linux\n"
+        #expect(ContainerEngine.parseLSOutput(output) == ["web"])
+    }
+}

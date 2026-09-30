@@ -229,22 +229,10 @@ public actor ContainerEngine {
     // MARK: - List
 
     public func list(all: Bool = false) async throws -> [ContainerInfo] {
-        // Get live state from container CLI
-        let (output, _) = try await runCLI(["ls"])
-        let liveIDs = parseLSOutput(output)
-
         var containers = try await store.listAll()
-
-        // Update state for each container we're tracking
-        for i in containers.indices {
-            let c = containers[i]
-            if liveIDs.contains(c.name) || liveIDs.contains(c.id) {
-                containers[i].state = .running
-                containers[i].status = "Up"
-            } else if containers[i].state == .running {
-                containers[i].state = .exited
-                containers[i].status = ContainerState.exited.displayString
-                try await store.save(containers[i])
+        if let liveIDs = await liveIDs() {
+            for i in containers.indices {
+                containers[i] = try await reconcile(containers[i], liveIDs: liveIDs)
             }
         }
 
@@ -287,10 +275,7 @@ public actor ContainerEngine {
     public func remove(_ identifier: String, force: Bool = false) async throws -> ContainerInfo {
         let container = try await resolve(identifier)
 
-        // Check live state — store may be stale (e.g. container exited on its own)
-        let (lsOut, _) = (try? await runCLI(["ls"])) ?? ("", 0)
-        let liveIDs = parseLSOutput(lsOut)
-        let isLiveRunning = liveIDs.contains(container.name) || liveIDs.contains(container.id)
+        let isLiveRunning = container.state == .running
 
         if isLiveRunning && !force {
             throw MockerError.operationFailed(
@@ -535,8 +520,9 @@ public actor ContainerEngine {
 
     public func start(_ identifier: String) async throws -> ContainerInfo {
         let container = try await resolve(identifier)
-        guard container.state != .running else { return container }
 
+        // No shortcut on an already running container: the runtime's start is idempotent,
+        // and asking it is what surfaces an unreachable runtime instead of a silent success.
         let (_, exitCode) = try await runCLI(["start", container.name])
         guard exitCode == 0 else {
             throw MockerError.operationFailed("failed to start container \(container.name)")
@@ -551,10 +537,41 @@ public actor ContainerEngine {
 
     // MARK: - Private Helpers
 
+    /// The stored state only records what mocker last did, so it goes stale when the
+    /// runtime restarts or a container exits on its own. Every command resolves through
+    /// here, so each one acts on the runtime's view instead of that record.
     private func resolve(_ identifier: String) async throws -> ContainerInfo {
-        if let container = try await store.findByName(identifier) { return container }
-        if let container = try await store.findByIDPrefix(identifier) { return container }
-        throw MockerError.containerNotFound(identifier)
+        var found = try await store.findByName(identifier)
+        if found == nil { found = try await store.findByIDPrefix(identifier) }
+        guard let container = found else { throw MockerError.containerNotFound(identifier) }
+        guard let liveIDs = await liveIDs() else { return container }
+        return try await reconcile(container, liveIDs: liveIDs)
+    }
+
+    /// Names and IDs of running containers, or `nil` when the runtime could not be
+    /// asked: a failed listing must not read as "nothing is running".
+    private func liveIDs() async -> Set<String>? {
+        guard let (output, status) = try? await runCLI(["ls"]), status == 0 else { return nil }
+        return Self.parseLSOutput(output)
+    }
+
+    /// Apply the runtime's running set to a stored container and persist any change.
+    private func reconcile(_ container: ContainerInfo, liveIDs: Set<String>) async throws -> ContainerInfo {
+        let updated = Self.reconciled(container, liveIDs: liveIDs)
+        if updated.state != container.state { try await store.save(updated) }
+        return updated
+    }
+
+    static func reconciled(_ container: ContainerInfo, liveIDs: Set<String>) -> ContainerInfo {
+        var updated = container
+        if liveIDs.contains(container.name) || liveIDs.contains(container.id) {
+            updated.state = .running
+            updated.status = "Up"
+        } else if container.state == .running {
+            updated.state = .exited
+            updated.status = ContainerState.exited.displayString
+        }
+        return updated
     }
 
     private func fetchContainerInfo(id: String, name: String, config: ContainerConfig) async throws -> ContainerInfo {
@@ -583,7 +600,7 @@ public actor ContainerEngine {
         )
     }
 
-    private func parseLSOutput(_ output: String) -> Set<String> {
+    static func parseLSOutput(_ output: String) -> Set<String> {
         var ids = Set<String>()
         let lines = output.components(separatedBy: "\n").dropFirst() // skip header
         for line in lines {

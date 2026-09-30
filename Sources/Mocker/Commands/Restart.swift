@@ -20,7 +20,10 @@ struct Restart: AsyncParsableCommand {
         let engine = try ContainerEngine(config: config)
 
         for identifier in containers {
-            _ = try await engine.stop(identifier)
+            // Like Docker, restarting a stopped container just starts it.
+            do {
+                _ = try await engine.stop(identifier)
+            } catch MockerError.containerNotRunning {}
             _ = try await engine.start(identifier)
             print(identifier)
         }
