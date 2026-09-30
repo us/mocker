@@ -81,14 +81,26 @@ public actor ComposeOrchestrator {
             }
         }
 
-        // Named volumes are bind-mounted from their backing directory, so both an
-        // unusable name and a missing external volume have to fail here — before any
-        // service starts — rather than as a raw runtime path error half-way through.
+        // An unusable name, a missing external volume and a native volume that several
+        // services would attach at once have to fail here, before any network or service
+        // is created, rather than as a runtime error half-way through.
+        let shared = Self.sharedVolumes(composeFile: composeFile, projectName: projectName)
         if !composeFile.volumes.isEmpty {
-            let existing = Set(await volumeManager.list().map(\.name))
+            let existing = Set(try await volumeManager.list().map(\.name))
             for volume in composeFile.volumes.values {
                 let name = volume.runtimeName(projectName: projectName)
-                _ = try volumeManager.mountpoint(name)
+                let isDirectory = try volumeManager.directoryPath(name) != nil
+                if shared.contains(name) {
+                    guard isDirectory || !existing.contains(name) else {
+                        let fix = volume.external
+                            ? "mount it in one service only"
+                            : "copy its data out, then remove it (mocker volume rm \(name)) so it is recreated as a shared directory volume"
+                        throw MockerError.operationFailed(
+                            "volume \(name) is mounted by several services, but it is a native volume, which only one running container can attach; \(fix)")
+                    }
+                } else if !isDirectory && !volume.external {
+                    try VolumeManager.validateNewName(name)
+                }
                 guard !volume.external || existing.contains(name) else {
                     throw MockerError.operationFailed(
                         "volume \(name) declared as external, but could not be found")
@@ -114,9 +126,21 @@ public actor ComposeOrchestrator {
 
         // Create volumes. External volumes are declared, not owned — the project
         // must use them as they are and never create (or later remove) them.
+        // A volume several services mount is a directory volume: a native one attaches to
+        // only one running container, since each container is its own VM.
         for (fullName, driver) in Self.volumesToCreate(composeFile: composeFile, projectName: projectName) {
-            if (try? await volumeManager.create(name: fullName, driver: driver)) != nil {
+            do {
+                if shared.contains(fullName) {
+                    _ = try await volumeManager.createDirectory(name: fullName)
+                } else {
+                    _ = try await volumeManager.create(name: fullName, driver: driver)
+                }
                 events.append(.volumeCreated(fullName))
+            } catch {
+                // Same rule as networks: only "it already exists" is benign.
+                guard (try? await volumeManager.inspect(fullName)) != nil else {
+                    throw error
+                }
             }
         }
 
@@ -241,8 +265,16 @@ public actor ComposeOrchestrator {
 
         if removeVolumes {
             for fullName in Self.volumesToRemove(composeFile: composeFile, projectName: projectName) {
-                if (try? await volumeManager.remove(fullName)) != nil {
+                do {
+                    _ = try await volumeManager.remove(fullName)
                     events.append(.volumeRemoved(fullName))
+                } catch MockerError.volumeNotFound {
+                    // Never created, or already gone: nothing to remove.
+                } catch {
+                    // The runtime refuses a native volume something still uses; say so rather
+                    // than leave the data for the next `up` to find.
+                    FileHandle.standardError.write(Data(
+                        "WARNING: could not remove volume \(fullName): \(error.localizedDescription)\n".utf8))
                 }
             }
         }
@@ -357,6 +389,14 @@ public actor ComposeOrchestrator {
             .sorted { $0.key < $1.key }
             .filter { !$0.value.external }
             .map { ($0.value.runtimeName(projectName: projectName), $0.value.driver) }
+    }
+
+    /// Runtime names of the top-level volumes that more than one service mounts.
+    public nonisolated static func sharedVolumes(
+        composeFile: ComposeFile,
+        projectName: String
+    ) -> Set<String> {
+        Set(composeFile.sharedVolumeKeys.compactMap { composeFile.volumes[$0]?.runtimeName(projectName: projectName) })
     }
 
     /// Project-owned volumes that `down --volumes` may remove: every non-`external:`
@@ -538,13 +578,13 @@ public actor ComposeOrchestrator {
         // Parse port mappings
         let ports = try service.ports.map { try PortMapping.parse($0) }
 
-        // Named volumes bind-mount their backing directory, exactly as Docker does
-        // internally, so the data survives container recreation.
+        // Named volumes outlive the container, native or directory-backed, so the data
+        // survives container recreation.
         let volumes = try Self.resolveVolumeMounts(
             service.volumes,
             projectDir: projectDir,
             namedVolumeSources: composeFile.volumes.mapValues {
-                try volumeManager.mountpoint($0.runtimeName(projectName: projectName))
+                try volumeManager.composeSource($0.runtimeName(projectName: projectName))
             }
         )
 
@@ -596,9 +636,9 @@ public actor ComposeOrchestrator {
     ///
     /// Bind-mount host paths and anonymous volumes (container paths only) are
     /// included as-is. A name declared in the file's top-level `volumes:` section is
-    /// bind-mounted from its backing directory (`namedVolumeSources`), which is what
-    /// keeps the data alive across `compose up --force-recreate`; an undeclared bare
-    /// name has no backing directory and is dropped.
+    /// mounted from `namedVolumeSources` (the native volume's name, or a directory
+    /// volume's backing directory), which is what keeps the data alive across
+    /// `compose up --force-recreate`; an undeclared bare name is dropped.
     ///
     /// Relative paths (`./foo`, `../bar`, `data/dir`) are resolved to absolute paths
     /// against `projectDir` (the Compose `--project-directory`, i.e. the directory

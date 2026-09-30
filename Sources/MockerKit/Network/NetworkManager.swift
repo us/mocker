@@ -145,7 +145,7 @@ public actor NetworkManager {
 
     /// The backend prints its diagnostics on stderr, which the runner folds into the
     /// output; pass the last non-empty line through rather than a generic message.
-    private static func errorMessage(from output: String, fallback: String) -> String {
+    static func errorMessage(from output: String, fallback: String) -> String {
         let lines = output
             .components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }

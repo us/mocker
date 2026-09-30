@@ -93,6 +93,30 @@ struct ComposeVolumeLifecycleTests {
         #expect(created.allSatisfy { $0.driver == "local" })
     }
 
+    @Test("A volume more than one service mounts is shared; one service is not")
+    func sharedVolumes() throws {
+        let compose = try parse("""
+        services:
+          web:
+            image: nginx
+            volumes: ["static:/usr/share/nginx/html", "cache:/cache"]
+          builder:
+            image: alpine
+            volumes: ["static:/out:ro", "./src:/src"]
+          db:
+            image: postgres
+            volumes: ["pgdata:/var/lib/postgresql/data"]
+        volumes:
+          static:
+          cache:
+          pgdata:
+        """)
+
+        #expect(ComposeOrchestrator.sharedVolumes(composeFile: compose, projectName: "proj") == ["proj-static"])
+        // `up web` alone must still create the volume the whole project shares as shared.
+        #expect(compose.filtering(services: ["web"]).sharedVolumeKeys == ["static"])
+    }
+
     @Test("Volume names that would escape the volumes directory are rejected", arguments: [
         "../etc", "a/b", "..", ".", "", "host:path",
     ])
