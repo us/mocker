@@ -331,10 +331,13 @@ State is stored as JSON files under `~/.mocker/`:
 ├── networks/
 │   └── a69bb9f3bb64.json      # NetworkInfo
 └── volumes/
-    ├── pgdata.json             # VolumeInfo
     └── pgdata/
-        └── _data/              # Actual volume data (bind-mounted)
+        └── _data/              # Directory volume (bind-mounted)
 ```
+
+Only directory volumes live here: those several compose services share, and those from
+earlier releases. Other named volumes are ext4 images in the `container` runtime
+(`container volume ls`).
 
 Stores load all JSON files from their directory on init. No database, no daemon — just files.
 

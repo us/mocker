@@ -66,7 +66,7 @@ mocker run [OPTIONS] IMAGE [COMMAND...]
 | `--cap-drop` | | Drop Linux capabilities |
 | `--stop-signal` | | Signal to stop the container (default: SIGTERM) |
 | `--stop-timeout` | | Timeout (in seconds) to stop a container |
-| `--memory` | `-m` | Memory limit (e.g. 512m, 1g) |
+| `--memory` | `-m` | Memory limit (e.g. 512m, 1g); without it the runtime default of 1 GiB applies |
 | `--cpus` | | Number of CPUs |
 | `--rm` | | Automatically remove the container when it exits |
 | `--annotation` | | Add an annotation to the container |

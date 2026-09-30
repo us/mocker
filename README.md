@@ -358,10 +358,11 @@ Mocker stores all state in `~/.mocker/`:
 ~/.mocker/
 ├── containers/   # Container metadata (one JSON file per container)
 ├── images/       # Image metadata
-└── volumes/      # Volume metadata + actual data directories
-    └── pgdata/
-        └── _data/
+└── volumes/      # Directory volumes (shared by compose services, or from earlier releases)
 ```
+
+Other named volumes live in Apple's `container` runtime as ext4 images, so images whose
+entrypoint changes ownership of their data directory (redis, postgres) run on them.
 
 ## Docker Compatibility
 
