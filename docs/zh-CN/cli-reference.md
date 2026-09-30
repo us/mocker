@@ -625,10 +625,12 @@ mocker network disconnect 网络 容器
 创建卷。
 
 ```
-mocker volume create [卷名]
+mocker volume create [--label 键=值] [卷名]
 ```
 
-在 `~/.mocker/volumes/<名称>/_data` 创建卷目录。
+在 Apple `container` 运行时中创建命名卷（ext4 镜像），入口脚本会 `chown` 数据目录的镜像（redis、postgres）可以正常使用。绑定挂载（`-v /主机路径:/data`）经由 virtiofs，不允许 `chown`。
+
+原生卷同一时间只能挂载到一个运行中的容器。被多个 compose 服务挂载的卷会创建为共享目录 `~/.mocker/volumes/<名称>/_data`，早期版本创建的卷也是这种目录；它们同样可以列出、挂载和删除。
 
 ---
 
@@ -672,7 +674,7 @@ mocker volume inspect 卷
 {
   "name": "pgdata",
   "driver": "local",
-  "mountpoint": "/Users/you/.mocker/volumes/pgdata/_data",
+  "mountpoint": "/Users/you/Library/Application Support/com.apple.container/volumes/pgdata/volume.img",
   "created": "2026-03-07T14:00:00Z",
   "labels": {}
 }

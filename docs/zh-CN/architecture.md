@@ -327,10 +327,11 @@ Mocker 全程使用 Swift 6 严格并发模型：
 ├── networks/
 │   └── a69bb9f3bb64.json      # NetworkInfo
 └── volumes/
-    ├── pgdata.json             # VolumeInfo
     └── pgdata/
-        └── _data/              # 实际卷数据（绑定挂载）
+        └── _data/              # 目录卷（绑定挂载）
 ```
+
+这里只存放目录卷：多个 compose 服务共享的卷，以及早期版本创建的卷。其余命名卷由 `container` 运行时以 ext4 镜像形式管理（`container volume ls`）。
 
 存储层在初始化时从目录读取所有 JSON 文件。无数据库，无守护进程——只有文件。
 

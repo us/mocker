@@ -123,6 +123,32 @@ directory of the first `-f` file). Shell environment takes priority over `.env`.
 
 ---
 
+## Volumes
+
+A named volume that one service mounts is a native `container` volume: an ext4 image the
+container owns, so images that `chown` their data directory (redis, postgres) work. The
+runtime attaches a native volume to one running container at a time, so a volume that
+several services mount is created as a shared directory under
+`~/.mocker/volumes/<project>-<volume>/_data` instead, where the container cannot `chown`.
+
+```yaml
+services:
+  web:
+    image: nginx
+    volumes: ["static:/usr/share/nginx/html:ro"]   # shared: directory volume
+  builder:
+    image: node
+    volumes: ["static:/out"]
+  db:
+    image: postgres
+    volumes: ["pgdata:/var/lib/postgresql/data"]   # one service: native volume
+volumes:
+  static:
+  pgdata:
+```
+
+Volumes created by earlier releases are directories and keep working as they are.
+
 ## Networking
 
 Networks declared in the file are created in the container runtime and services are

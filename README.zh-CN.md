@@ -309,10 +309,10 @@ Mocker 将所有状态存储在 `~/.mocker/`：
 ├── containers/   # 容器元数据（每个容器一个 JSON 文件）
 ├── images/       # 镜像元数据
 ├── networks/     # 网络元数据
-└── volumes/      # 卷元数据 + 实际数据目录
-    └── pgdata/
-        └── _data/
+└── volumes/      # 目录卷（多个 compose 服务共享的卷，或早期版本创建的卷）
 ```
+
+其余命名卷由 Apple `container` 运行时以 ext4 镜像形式管理，因此入口脚本会修改数据目录属主的镜像（redis、postgres）可以正常运行。
 
 ## Docker 兼容性
 

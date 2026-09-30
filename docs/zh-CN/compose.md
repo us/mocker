@@ -133,7 +133,7 @@ services:
       - db-data:/var/lib/postgresql/data
 ```
 
-卷数据存储于 `~/.mocker/volumes/<项目>-<卷名>/_data`。
+卷名为 `<项目>-<卷名>`。只被一个服务挂载的卷是 `container` 运行时的原生卷（ext4 镜像，可 `chown`，同一时间只能挂载到一个运行中的容器）；被多个服务挂载的卷会创建为共享目录 `~/.mocker/volumes/<项目>-<卷名>/_data`，容器内不能 `chown`。早期版本创建的卷仍为目录，照常可用。
 
 ## 依赖顺序
 

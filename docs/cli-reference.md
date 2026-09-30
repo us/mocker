@@ -448,16 +448,24 @@ mocker network disconnect NETWORK CONTAINER
 
 ### `mocker volume create`
 
-Create a volume. Data is stored at `~/.mocker/volumes/<name>/_data`.
+Create a named volume in Apple's `container` runtime. It is an ext4 image the container
+fully owns, so images whose entrypoint `chown`s the data directory (redis, postgres) work
+on it. Bind mounts (`-v /host/path:/data`) go over virtiofs, where `chown` is not
+permitted; use a named volume for those images.
+
+A native volume attaches to one running container at a time. Compose creates a volume that
+several services mount as a shared directory under `~/.mocker/volumes/<name>/_data`, and
+volumes created by earlier releases are such directories too; both are listed, mounted and
+removable like native ones.
 
 ```bash
-mocker volume create [VOLUME]
+mocker volume create [--label KEY=VALUE] [VOLUME]
 ```
 
 **Examples:**
 ```bash
 mocker volume create pgdata
-mocker volume create app-uploads
+mocker volume create --label team=infra app-uploads
 ```
 
 ---
