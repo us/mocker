@@ -147,7 +147,7 @@ struct SystemDf: AsyncParsableCommand {
 
         let containers = try await engine.list(all: true)
         let images = try await imageManager.list(enrich: false)
-        let volumes = await volumeManager.list()
+        let volumes = try await volumeManager.list()
 
         let headers = ["TYPE", "TOTAL", "ACTIVE", "SIZE", "RECLAIMABLE"]
         let rows = [

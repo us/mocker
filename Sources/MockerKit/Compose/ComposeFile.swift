@@ -9,6 +9,9 @@ public struct ComposeFile: Sendable {
     public var volumes: [String: ComposeVolume]
     /// Top-level `name:` key — one of the project-name sources (see `resolveProjectName`).
     public var name: String?
+    /// Set by `filtering(services:)`, so a subset (`up web`) still knows which volumes the
+    /// whole project shares.
+    private var projectSharedVolumes: Set<String>?
 
     public init(
         services: [String: ComposeService] = [:],
@@ -20,6 +23,15 @@ public struct ComposeFile: Sendable {
         self.networks = networks
         self.volumes = volumes
         self.name = name
+    }
+
+    /// Top-level volume keys that more than one service mounts.
+    public var sharedVolumeKeys: Set<String> {
+        if let projectSharedVolumes { return projectSharedVolumes }
+        let users = services.values.flatMap { service in
+            Set(service.volumes.compactMap { try? VolumeMount.parse($0).source })
+        }
+        return Set(volumes.keys.filter { key in users.filter { $0 == key }.count > 1 })
     }
 
     /// Default compose file names searched in order, matching Docker Compose V2 behaviour.
@@ -433,7 +445,9 @@ public struct ComposeFile: Sendable {
         for name in requested { include(name) }
 
         let filteredServices = services.filter { included.contains($0.key) }
-        return ComposeFile(services: filteredServices, networks: networks, volumes: volumes, name: self.name)
+        var filtered = ComposeFile(services: filteredServices, networks: networks, volumes: volumes, name: self.name)
+        filtered.projectSharedVolumes = sharedVolumeKeys
+        return filtered
     }
 
     /// Throw when a service joins a network the file never declares — the container

@@ -37,7 +37,15 @@ struct VolumeCreate: AsyncParsableCommand {
         let config = MockerConfig()
         try config.ensureDirectories()
         let manager = try VolumeManager(config: config)
-        let volume = try await manager.create(name: name, driver: driver)
+        let labels = Dictionary(
+            label.compactMap { item -> (String, String)? in
+                let parts = item.split(separator: "=", maxSplits: 1)
+                guard parts.count == 2 else { return nil }
+                return (String(parts[0]), String(parts[1]))
+            },
+            uniquingKeysWith: { _, last in last }
+        )
+        let volume = try await manager.create(name: name, driver: driver, labels: labels)
         print(volume.name)
     }
 }
@@ -60,7 +68,7 @@ struct VolumeList: AsyncParsableCommand {
     func run() async throws {
         let config = MockerConfig()
         let manager = try VolumeManager(config: config)
-        var volumes = await manager.list()
+        var volumes = try await manager.list()
 
         for f in filter {
             let parts = f.split(separator: "=", maxSplits: 1)
@@ -134,8 +142,12 @@ struct VolumePrune: AsyncParsableCommand {
     var filter: [String] = []
 
     func run() async throws {
+        // Pruning more than the filter asks for would delete data the user meant to keep.
+        guard filter.isEmpty else {
+            throw MockerError.operationFailed("volume prune --filter is not supported")
+        }
         if !force {
-            print("WARNING! This will remove anonymous local volumes not used by at least one container.")
+            print("WARNING! This will remove \(all ? "all" : "anonymous") local volumes not used by at least one container.")
             print("Are you sure you want to continue? [y/N] ", terminator: "")
             guard let answer = readLine(), answer.lowercased() == "y" else {
                 print("Cancelled.")
@@ -145,14 +157,12 @@ struct VolumePrune: AsyncParsableCommand {
 
         let config = MockerConfig()
         let manager = try VolumeManager(config: config)
-        let volumes = await manager.list()
-
-        var removed = 0
-        for v in volumes {
-            _ = try? await manager.remove(v.name)
-            removed += 1
+        let removed = try await manager.prune(all: all)
+        if !removed.isEmpty {
+            print("Deleted Volumes:")
+            for name in removed { print(name) }
+            print("")
         }
-        print("Deleted \(removed) volumes")
         print("Total reclaimed space: 0B")
     }
 }
