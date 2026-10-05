@@ -72,7 +72,7 @@ public actor ContainerEngine {
         return info
     }
 
-    static func buildRunArguments(name: String, config containerConfig: ContainerConfig) -> [String] {
+    static func buildRunArguments(name: String, config containerConfig: ContainerConfig, attached: Bool = false) -> [String] {
         var args = ["run"]
 
         args += ["--name", name]
@@ -175,8 +175,9 @@ public actor ContainerEngine {
             args += ["--kernel", kernel]
         }
 
-        // Detach by default unless interactive
-        if !containerConfig.interactive {
+        // Detach by default unless interactive; an attached run keeps the runtime in the
+        // foreground, which is what streams output and returns the container's exit status.
+        if !containerConfig.interactive && !attached {
             args += ["-d"]
         }
 
@@ -296,13 +297,88 @@ public actor ContainerEngine {
 
     // MARK: - Logs
 
-    public func logs(_ identifier: String, follow: Bool = false, tail: Int? = nil) async throws -> [String] {
+    public func logs(_ identifier: String, tail: Int? = nil) async throws -> [String] {
         let container = try await resolve(identifier)
-        var args = ["logs", container.name]
-        if follow { args.append("-f") }
+        let (output, _) = try await runCLI(["logs", container.name])
+        let lines = output.components(separatedBy: "\n").filter { !$0.isEmpty }
+        return tail.map { Array(lines.suffix($0)) } ?? lines
+    }
 
-        let (output, _) = try await runCLI(args)
-        return output.components(separatedBy: "\n").filter { !$0.isEmpty }
+    /// Print the log, then new lines as they appear, until the container has exited.
+    /// The runtime's `logs -f` is no help: it returns at once, without error, while the
+    /// container has written nothing yet, and never returns once the container is gone.
+    /// So the log is re-read, and only the runtime's running set says when to stop.
+    /// ponytail: polls every 0.5s and re-reads the whole log; add a streaming reader if that costs.
+    public func followLogs(_ identifier: String, tail: Int? = nil) async throws {
+        let container = try await resolve(identifier)
+        var printed = 0
+        var first = true
+        var finished = false
+        while true {
+            let lines = try await logs(container.name)
+            let from = first ? max(0, lines.count - (tail ?? lines.count)) : printed
+            for line in lines.dropFirst(from) { print(line) }
+            fflush(stdout)
+            printed = lines.count
+            first = false
+            if finished { break }
+            // A failed listing counts as "still running"; Ctrl-C ends the wait.
+            if let live = await liveIDs(), !live.contains(container.name), !live.contains(container.id) {
+                finished = true // one more read for what was written just before the exit
+                continue
+            }
+            try await Task.sleep(nanoseconds: 500_000_000)
+        }
+    }
+
+    /// Run a container in the foreground: the runtime's own `run` owns stdio (so `-i`/`-t`
+    /// work), blocks until the container exits and hands back its exit status.
+    /// A `-d` run followed by polling the log cannot do that, since the runtime does not
+    /// expose the exit code of a detached container.
+    public func runAttached(_ containerConfig: ContainerConfig) async throws -> Int32 {
+        let name = containerConfig.name ?? generateName()
+        if let existing = try await store.findByName(name) {
+            throw MockerError.containerAlreadyExists(existing.name)
+        }
+
+        // Recorded up front so ps/stop/kill see the container while the run is blocking.
+        let record = ContainerInfo(
+            id: name, name: name, image: containerConfig.image, state: .running,
+            status: "Up", created: Date(), ports: containerConfig.ports,
+            labels: containerConfig.labels, command: containerConfig.command.joined(separator: " "),
+            networkAddress: ""
+        )
+        try await store.save(record)
+
+        // posix_spawn, not Process: Process puts the child in its own process group, which
+        // makes it a background job for the terminal and its reads from a tty (-it) are ignored.
+        let argv = [Self.containerCLI] + Self.buildRunArguments(name: name, config: containerConfig, attached: true)
+        let cArgs: [UnsafeMutablePointer<CChar>?] = argv.map { strdup($0) } + [nil]
+        defer { cArgs.forEach { free($0) } }
+        var pid: pid_t = 0
+        guard posix_spawn(&pid, Self.containerCLI, nil, nil, cArgs, environ) == 0 else {
+            try await store.delete(record.id)
+            throw MockerError.operationFailed("failed to launch \(Self.containerCLI)")
+        }
+        // Standard streams are inherited from this process.
+        let status: Int32 = await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                var raw: Int32 = 0
+                while waitpid(pid, &raw, 0) == -1 && errno == EINTR {}
+                // WIFEXITED / WEXITSTATUS / signal, as the shell reports them
+                continuation.resume(returning: (raw & 0x7f) == 0 ? (raw >> 8) & 0xff : 128 + (raw & 0x7f))
+            }
+        }
+
+        if containerConfig.rm {
+            try await store.delete(record.id)
+        } else {
+            var done = record
+            done.state = .exited
+            done.status = ContainerState.exited.displayString
+            try await store.save(done)
+        }
+        return status
     }
 
     // MARK: - Exec

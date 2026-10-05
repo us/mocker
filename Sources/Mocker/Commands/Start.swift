@@ -25,10 +25,7 @@ struct Start: AsyncParsableCommand {
         for identifier in containers {
             let container = try await engine.start(identifier)
             if attach {
-                let lines = try await engine.logs(container.id, follow: true)
-                for line in lines {
-                    print(line)
-                }
+                try await engine.followLogs(container.id)
             } else {
                 print(identifier)
             }

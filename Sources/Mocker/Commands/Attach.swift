@@ -23,9 +23,6 @@ struct Attach: AsyncParsableCommand {
         let engine = try ContainerEngine(config: config)
 
         // Attach is essentially following logs with interactive stdin
-        let lines = try await engine.logs(container, follow: true)
-        for line in lines {
-            print(line)
-        }
+        try await engine.followLogs(container)
     }
 }

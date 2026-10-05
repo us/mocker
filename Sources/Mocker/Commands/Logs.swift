@@ -30,9 +30,11 @@ struct Logs: AsyncParsableCommand {
     func run() async throws {
         let config = MockerConfig()
         let engine = try ContainerEngine(config: config)
-        let lines = try await engine.logs(container, follow: follow, tail: tail)
-
-        for line in lines {
+        if follow {
+            try await engine.followLogs(container, tail: tail)
+            return
+        }
+        for line in try await engine.logs(container, tail: tail) {
             print(line)
         }
     }

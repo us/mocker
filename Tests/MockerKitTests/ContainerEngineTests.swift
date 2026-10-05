@@ -209,6 +209,16 @@ struct ContainerEngineTests {
         if let idx { #expect(args[idx + 1] == "3G") }
     }
 
+    @Test("An attached run keeps the runtime in the foreground; a normal run detaches")
+    func testRunArgumentsAttached() {
+        let config = ContainerConfig(image: "alpine", rm: true)
+
+        #expect(ContainerEngine.buildRunArguments(name: "a", config: config).contains("-d"))
+        let attached = ContainerEngine.buildRunArguments(name: "a", config: config, attached: true)
+        #expect(!attached.contains("-d"))
+        #expect(attached.contains("--rm"))
+    }
+
     @Test("Run arguments omit -m when memory is unset")
     func testRunArgumentsOmitMemoryWhenUnset() {
         let config = ContainerConfig(image: "alpine")
