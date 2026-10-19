@@ -355,7 +355,7 @@ struct Create: AsyncParsableCommand {
             environment: environment,
             ports: ports,
             volumes: volumes,
-            network: network,
+            networks: network.map { [$0] } ?? [],
             detach: true,
             interactive: interactive,
             tty: tty,

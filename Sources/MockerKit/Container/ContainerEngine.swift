@@ -165,9 +165,9 @@ public actor ContainerEngine {
             args.append("--virtualization")
         }
 
-        // `network` was carried on the config but never emitted, so a compose service's
-        // `networks:` had no effect on the container at all.
-        if let network = containerConfig.network, !network.isEmpty {
+        // One flag per network, in order: the runtime makes the first one eth0 and the
+        // default route.
+        for network in containerConfig.networks where !network.isEmpty {
             args += ["--network", network]
         }
 
@@ -531,6 +531,16 @@ public actor ContainerEngine {
         var updated = container
         updated.state = .running
         updated.status = "Up"
+        // A started container can come back on new addresses; the ones recorded at `run`
+        // would send compose peers to an IP nobody holds.
+        let fresh = try await fetchContainerInfo(
+            id: container.id, name: container.name, config: ContainerConfig(image: container.image)
+        )
+        // Only a decoded inspect with addresses replaces them; an empty one keeps the old.
+        if !(fresh.networkAddresses ?? [:]).isEmpty {
+            updated.networkAddress = fresh.networkAddress
+            updated.networkAddresses = fresh.networkAddresses
+        }
         try await store.save(updated)
         return updated
     }
@@ -706,8 +716,18 @@ extension ContainerEngine {
             ? "Up Less than a second"
             : ContainerState.exited.displayString
         let networks = (statusObj?["networks"] as? [[String: Any]]) ?? []
-        let rawAddr = (networks.first?["ipv4Address"] as? String) ?? ""
-        let addr = rawAddr.split(separator: "/").first.map(String.init) ?? rawAddr
+        // `ipv4Address` is CIDR (`192.168.64.3/24`); keep the address only.
+        func address(_ entry: [String: Any]?) -> String {
+            let raw = (entry?["ipv4Address"] as? String) ?? ""
+            return raw.split(separator: "/").first.map(String.init) ?? raw
+        }
+        let addr = address(networks.first)
+        var addresses: [String: String] = [:]
+        for entry in networks {
+            if let network = entry["network"] as? String, !address(entry).isEmpty {
+                addresses[network] = address(entry)
+            }
+        }
         // Memory limit: Apple's inspect reports it under `configuration.resources.memoryInBytes`
         // (only when the container was created with an explicit limit).
         let memoryBytes = ((cfg["resources"] as? [String: Any])?["memoryInBytes"] as? NSNumber)?.uint64Value
@@ -722,6 +742,7 @@ extension ContainerEngine {
             labels: config.labels,
             command: config.command.joined(separator: " "),
             networkAddress: addr,
+            networkAddresses: addresses,
             memoryBytes: memoryBytes
         )
     }

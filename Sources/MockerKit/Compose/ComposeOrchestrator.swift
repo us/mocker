@@ -349,19 +349,45 @@ public actor ComposeOrchestrator {
         "\(projectName)-default"
     }
 
-    /// The runtime network a service joins: the first it names, else the file's own
-    /// `default:` entry if it has one, else the project's implicit default.
-    public nonisolated static func networkForService(
+    /// The runtime networks a service joins, in its own order (the first carries the
+    /// default route): every one it names, else the file's own `default:` entry if it
+    /// has one, else the project's implicit default.
+    public nonisolated static func networksForService(
         _ service: ComposeService,
         composeFile: ComposeFile,
         projectName: String
-    ) -> String {
-        if let named = service.networks.first {
-            return composeFile.networks[named]?.runtimeName(projectName: projectName)
-                ?? "\(projectName)-\(named)"
+    ) -> [String] {
+        if !service.networks.isEmpty {
+            var seen = Set<String>()
+            // Two keys can name one runtime network (`name:`); the runtime takes each once.
+            return service.networks.map { named in
+                composeFile.networks[named]?.runtimeName(projectName: projectName)
+                    ?? "\(projectName)-\(named)"
+            }.filter { seen.insert($0).inserted }
         }
-        return composeFile.networks["default"]?.runtimeName(projectName: projectName)
-            ?? implicitDefaultNetwork(projectName: projectName)
+        return [composeFile.networks["default"]?.runtimeName(projectName: projectName)
+            ?? implicitDefaultNetwork(projectName: projectName)]
+    }
+
+    /// The address `target` reaches `peer` on: the peer's address on the first of the
+    /// target's networks the peer also joined, `nil` when they share none (the networks
+    /// are isolated, so any address would be unreachable). Records from before
+    /// per-network addresses fall back to the primary address, still only when the
+    /// recorded networks overlap.
+    nonisolated static func hostsAddress(of peer: ContainerInfo, for target: ContainerInfo) -> String? {
+        func joined(_ container: ContainerInfo) -> [String] {
+            (container.labels["com.mocker.compose.network"] ?? "").split(separator: ",").map(String.init)
+        }
+        let peerAddresses = peer.networkAddresses ?? [:]
+        let targetAddresses = target.networkAddresses ?? [:]
+        guard !peerAddresses.isEmpty, !targetAddresses.isEmpty else {
+            let disjoint = !joined(peer).isEmpty && !joined(target).isEmpty
+                && Set(joined(peer)).isDisjoint(with: joined(target))
+            return peer.networkAddress.isEmpty || disjoint ? nil : peer.networkAddress
+        }
+        return (joined(target) + targetAddresses.keys.sorted())
+            .first { targetAddresses[$0] != nil && peerAddresses[$0] != nil }
+            .flatMap { peerAddresses[$0] }
     }
 
     /// Only needed when some service does not name a network of its own.
@@ -476,24 +502,25 @@ public actor ComposeOrchestrator {
 
     // MARK: - Private
 
-    /// Inject other services' IPs into /etc/hosts of each running container.
+    /// Inject other services' IPs into /etc/hosts of each just-started container.
     /// This enables service-name DNS resolution (e.g. "db:5432") in compose projects.
     private func injectServiceHostnames(_ containers: [(serviceName: String, info: ContainerInfo)]) async {
-        // Only containers with a known IP can participate
-        let withIP = containers.filter { !$0.info.networkAddress.isEmpty }
-        guard withIP.count > 1 else { return }
+        // Peers are every project container, so a partial `up` or `restart` still
+        // resolves the services it kept running.
+        let peers = (try? await ps())?.filter(\.state.isActive).map {
+            (serviceName: $0.labels["com.mocker.compose.service"] ?? "", info: $0)
+        } ?? containers
 
-        for target in withIP {
-            // Build /etc/hosts entries for all *other* services
-            let otherServices = withIP.filter { $0.serviceName != target.serviceName }
-            guard !otherServices.isEmpty else { continue }
-
+        for target in containers where !target.info.networkAddress.isEmpty {
             // Build args array for safe execution — no shell interpolation
             // Each entry is passed as a separate argument to avoid injection
             var hostsContent = ""
-            for svc in otherServices {
-                hostsContent += "\(svc.info.networkAddress) \(svc.serviceName)\n"
+            for svc in peers where svc.serviceName != target.serviceName {
+                if let address = Self.hostsAddress(of: svc.info, for: target.info) {
+                    hostsContent += "\(address) \(svc.serviceName)\n"
+                }
             }
+            guard !hostsContent.isEmpty else { continue }
 
             // Use tee -a to append to /etc/hosts without shell interpolation
             let process = Process()
@@ -529,16 +556,10 @@ public actor ComposeOrchestrator {
         let containerName = "\(projectName)-\(service.name)-1"
 
         // Resolved once: it is both what the container joins and what is recorded on it,
-        // so a later change to the network is visible to the reconcile.
-        let resolvedNetwork = Self.networkForService(
+        // so a later change to the networks is visible to the reconcile.
+        let resolvedNetworks = Self.networksForService(
             service, composeFile: composeFile, projectName: projectName
         )
-
-        if service.networks.count > 1 {
-            FileHandle.standardError.write(Data(
-                ("WARNING: service \(service.name) lists \(service.networks.count) networks; "
-                 + "the runtime attaches one, joining \(service.networks[0])\n").utf8))
-        }
 
         // Decide whether to build or pull. Per the Compose spec, a service with
         // both `image:` and `build:` is built and tagged with `image:` — not pulled.
@@ -602,18 +623,19 @@ public actor ComposeOrchestrator {
             environment: service.environment,
             ports: ports,
             volumes: volumes,
-            // Resolved through the network's own declaration so an external network is
+            // Resolved through each network's own declaration so an external network is
             // joined under its real name instead of a project-prefixed one that
-            // does not exist. Only the first is used: attaching a container to a second
-            // network fails inside the guest on this runtime.
-            network: resolvedNetwork,
+            // does not exist.
+            networks: resolvedNetworks,
             detach: detach,
             labels: service.labels.merging(
                 [
                     "com.mocker.compose.project": projectName,
                     "com.mocker.compose.service": service.name,
                     "com.mocker.compose.config-hash": ComposeService.hash(of: service),
-                    "com.mocker.compose.network": resolvedNetwork,
+                    // Comma-joined in join order; a single network reads as before, so
+                    // containers from earlier releases are not recreated.
+                    "com.mocker.compose.network": resolvedNetworks.joined(separator: ","),
                 ]
             ) { _, new in new },
             workingDir: service.workingDir,
@@ -715,9 +737,9 @@ extension ComposeOrchestrator {
                 kind = obs.state == .running ? .keep : .start
             case (let .some(obs), false, false):
                 let expectedHash = ComposeService.hash(of: service)
-                let expectedNetwork = networkForService(
+                let expectedNetwork = networksForService(
                     service, composeFile: composeFile, projectName: projectName
-                )
+                ).joined(separator: ",")
                 if obs.configHash != expectedHash {
                     kind = .removeAndRecreate
                 } else if obs.network != expectedNetwork {

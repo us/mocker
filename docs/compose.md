@@ -152,8 +152,11 @@ Volumes created by earlier releases are directories and keep working as they are
 ## Networking
 
 Networks declared in the file are created in the container runtime and services are
-attached to them. A service joins one network — the runtime attaches a container to a
-single network, so a service listing several joins the first and says so.
+attached to them. A service joins every network it lists, and only services that share a
+network can reach each other, so a project can keep `web` and `db` apart while `api` sits
+on both. The first network listed carries the default route (with the mapping form of
+`networks:`, the first by name). Tested with `container` 1.5.0; older runtimes can fail to
+start a container on two networks.
 
 Services on the same network can reach each other by service name:
 

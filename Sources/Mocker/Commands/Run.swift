@@ -403,7 +403,7 @@ struct Run: AsyncParsableCommand {
             environment: environment,
             ports: ports,
             volumes: volumes,
-            network: network,
+            networks: network.map { [$0] } ?? [],
             detach: detach,
             interactive: interactive,
             tty: tty,

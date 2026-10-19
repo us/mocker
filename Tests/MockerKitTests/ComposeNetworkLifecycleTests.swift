@@ -129,8 +129,8 @@ struct ComposeNetworkLifecycleTests {
             .map(\.name) == ["shared-default"])
         // The service must join that same network. Resolving it separately from the
         // creation list is how a container ends up asking for a network nobody made.
-        #expect(ComposeOrchestrator.networkForService(
-            compose.services["web"]!, composeFile: compose, projectName: "proj") == "shared-default")
+        #expect(ComposeOrchestrator.networksForService(
+            compose.services["web"]!, composeFile: compose, projectName: "proj") == ["shared-default"])
     }
 
     @Test("A service joins the network the project actually creates", arguments: [
@@ -142,8 +142,105 @@ struct ComposeNetworkLifecycleTests {
     func serviceNetworkMatchesCreatedNetwork(yaml: String, expected: String) throws {
         let compose = try parse(yaml)
 
-        #expect(ComposeOrchestrator.networkForService(
-            compose.services["web"]!, composeFile: compose, projectName: "proj") == expected)
+        #expect(ComposeOrchestrator.networksForService(
+            compose.services["web"]!, composeFile: compose, projectName: "proj") == [expected])
+    }
+
+    @Test("A service joins every network it names, in its order")
+    func serviceJoinsAllNetworks() throws {
+        let compose = try parse("""
+        services:
+          api:
+            image: nginx
+            networks: [front, back]
+        networks:
+          front:
+          back:
+            external: true
+        """)
+
+        #expect(ComposeOrchestrator.networksForService(
+            compose.services["api"]!, composeFile: compose, projectName: "proj") == ["proj-front", "back"])
+    }
+
+    @Test("Two keys naming one runtime network join it once")
+    func serviceNetworksDeduplicated() throws {
+        let compose = try parse("""
+        services:
+          api:
+            image: nginx
+            networks: [front, alias]
+        networks:
+          front:
+            name: shared
+          alias:
+            name: shared
+        """)
+
+        #expect(ComposeOrchestrator.networksForService(
+            compose.services["api"]!, composeFile: compose, projectName: "proj") == ["shared"])
+    }
+
+    @Test("Reconcile keeps a container whose recorded networks match, recreates one that joined fewer")
+    func reconcileComparesAllNetworks() throws {
+        let compose = try parse("""
+        services:
+          api:
+            image: nginx
+            networks: [front, back]
+        networks:
+          front:
+          back:
+        """)
+        let hash = ComposeService.hash(of: compose.services["api"]!)
+        func decision(_ label: String) -> ReconcileAction.Kind? {
+            ComposeOrchestrator.reconcileDecision(
+                observedContainers: [ObservedContainer(
+                    name: "proj-api-1", serviceName: "api", configHash: hash, network: label)],
+                composeFile: compose, projectName: "proj", forceRecreate: false, noRecreate: false
+            ).first?.kind
+        }
+
+        #expect(decision("proj-front,proj-back") == .keep)
+        // An earlier release recorded (and joined) only the first network.
+        #expect(decision("proj-front") == .removeAndRecreate)
+    }
+
+    @Test("Hosts entries use the address on a shared network and skip isolated peers")
+    func hostsAddressPicksSharedNetwork() {
+        func info(_ addresses: [String: String]?, joined: String = "", primary: String = "") -> ContainerInfo {
+            ContainerInfo(
+                id: "c", name: "c", image: "i", state: .running, status: "Up", created: Date(),
+                labels: ["com.mocker.compose.network": joined],
+                networkAddress: primary, networkAddresses: addresses)
+        }
+        let web = info(["front": "10.0.0.2"], joined: "front", primary: "10.0.0.2")
+        let api = info(["front": "10.0.0.3", "back": "10.0.1.3"], joined: "front,back", primary: "10.0.0.3")
+        let db = info(["back": "10.0.1.4"], joined: "back", primary: "10.0.1.4")
+
+        #expect(ComposeOrchestrator.hostsAddress(of: api, for: db) == "10.0.1.3")
+        #expect(ComposeOrchestrator.hostsAddress(of: api, for: web) == "10.0.0.3")
+        #expect(ComposeOrchestrator.hostsAddress(of: db, for: web) == nil)
+        // Several shared networks pick by the target's join order, not by name.
+        let both = info(["front": "10.0.0.9", "back": "10.0.1.9"], joined: "front,back")
+        #expect(ComposeOrchestrator.hostsAddress(of: api, for: both) == "10.0.0.3")
+        // Records from before per-network addresses keep the primary address, unless their
+        // recorded network is one the target is not on.
+        #expect(ComposeOrchestrator.hostsAddress(
+            of: info(nil, joined: "back", primary: "10.0.1.7"), for: db) == "10.0.1.7")
+        #expect(ComposeOrchestrator.hostsAddress(
+            of: info(nil, joined: "back", primary: "10.0.1.7"), for: web) == nil)
+    }
+
+    @Test("A stored container record from before per-network addresses still decodes")
+    func oldContainerRecordDecodes() throws {
+        let json = """
+        {"id":"a","name":"a","image":"alpine","state":"running","status":"Up",
+         "created":0,"ports":[],"labels":{},"command":"","networkAddress":"10.0.0.1"}
+        """
+        let decoded = try JSONDecoder().decode(ContainerInfo.self, from: Data(json.utf8))
+        #expect(decoded.networkAddresses == nil)
+        #expect(decoded.networkAddress == "10.0.0.1")
     }
 
     @Test("A service's networks: accepts both the list and the mapping form")

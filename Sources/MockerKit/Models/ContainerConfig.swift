@@ -8,7 +8,8 @@ public struct ContainerConfig: Codable, Sendable {
     public var environment: [String: String]
     public var ports: [PortMapping]
     public var volumes: [VolumeMount]
-    public var network: String?
+    /// Joined in order: the first carries the default route.
+    public var networks: [String]
     public var detach: Bool
     public var interactive: Bool
     public var tty: Bool
@@ -45,7 +46,7 @@ public struct ContainerConfig: Codable, Sendable {
         environment: [String: String] = [:],
         ports: [PortMapping] = [],
         volumes: [VolumeMount] = [],
-        network: String? = nil,
+        networks: [String] = [],
         detach: Bool = false,
         interactive: Bool = false,
         tty: Bool = false,
@@ -81,7 +82,7 @@ public struct ContainerConfig: Codable, Sendable {
         self.environment = environment
         self.ports = ports
         self.volumes = volumes
-        self.network = network
+        self.networks = networks
         self.detach = detach
         self.interactive = interactive
         self.tty = tty

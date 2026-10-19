@@ -105,6 +105,17 @@ struct ContainerEngineDecodeInspectTests {
         #expect(result?.networkAddress == "10.0.0.1")
     }
 
+    @Test("decodeInspect records the address on each network")
+    func decodeInspect_multipleNetworks_addressPerNetwork() {
+        let networks: [[String: Any]] = [
+            ["network": "front", "ipv4Address": "10.0.0.1/24"],
+            ["network": "back", "ipv4Address": "10.0.1.1/24"]
+        ]
+        let dict = makeDict(state: "running", ipv4Address: nil, networks: networks)
+        let result = ContainerEngine.decodeInspect(dict, id: "id1", name: "ctn", config: makeConfig())
+        #expect(result?.networkAddresses == ["front": "10.0.0.1", "back": "10.0.1.1"])
+    }
+
     @Test("decodeInspect empty networks array returns empty address")
     func decodeInspect_emptyNetworks_returnsEmptyAddress() {
         let dict = makeDict(state: "running", ipv4Address: nil, networks: [])
