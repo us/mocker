@@ -30,7 +30,7 @@ struct History: AsyncParsableCommand {
         let manager = try ImageManager(config: config)
         let info = try await manager.inspect(image, platform: platform)
 
-        let shortID = String(info.id.prefix(12))
+        let shortID = ImageInfo.shortID(of: info.id)
         let sizeString = ByteCountFormatter.string(fromByteCount: info.size, countStyle: .file)
         let createdAgo = info.created.map { RelativeDate.humanRelative($0) } ?? "N/A"
 

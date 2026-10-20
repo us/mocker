@@ -28,9 +28,17 @@ public struct ImageInfo: Codable, Sendable, Identifiable {
         self.labels = labels
     }
 
-    /// Short ID (first 12 characters).
+    /// Short ID: the first 12 hex digits of the digest, which is what `docker images -q`
+    /// prints. Taking 12 characters of `sha256:<hex>` left only 5 hex digits — too short
+    /// to be a usable handle once a store holds more than a few images.
     public var shortID: String {
-        String(id.prefix(12))
+        Self.shortID(of: id)
+    }
+
+    /// Short form of any `sha256:`-prefixed (or bare) digest; see `shortID`.
+    public static func shortID(of digest: String) -> String {
+        let hex = digest.hasPrefix("sha256:") ? String(digest.dropFirst("sha256:".count)) : digest
+        return String(hex.prefix(12))
     }
 
     /// Full image reference (repository:tag).
