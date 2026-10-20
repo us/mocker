@@ -153,11 +153,27 @@ struct GoTemplateTests {
         let c = runningContainer()
         #expect(throws: GoTemplateError.self) { try GoTemplate.render("{{if .State.Running}}y{{end}}", object: c) }
         #expect(throws: GoTemplateError.self) { try GoTemplate.render("{{range .X}}{{end}}", object: c) }
-        #expect(throws: GoTemplateError.self) { try GoTemplate.render("{{json .Config}}", object: c) }
+        #expect(throws: GoTemplateError.self) { try GoTemplate.render("{{json .Config | printf}}", object: c) }
         #expect(throws: GoTemplateError.self) { try GoTemplate.render(#"{{index .Config "Image"}}"#, object: c) }
         // A bare `{{.}}` (whole-object identity) is outside the field-path subset.
         #expect(throws: GoTemplateError.self) { try GoTemplate.render("{{.}}", object: c) }
         // A valid field token sitting next to an unsupported action still fails the whole render.
         #expect(throws: GoTemplateError.self) { try GoTemplate.render("{{.Id}} {{range .X}}{{end}}", object: c) }
+    }
+
+    // MARK: - json
+
+    @Test("{{json .}} renders the whole object as compact JSON with sorted keys")
+    func jsonWholeObject() throws {
+        let object: [String: Any] = ["B": 2, "A": "x/y", "C": ["D": true]]
+        #expect(try GoTemplate.render("{{json .}}", object: object) == #"{"A":"x/y","B":2,"C":{"D":true}}"#)
+    }
+
+    @Test("{{json .Path}} renders a nested value and null for a missing path")
+    func jsonPath() throws {
+        let c = runningContainer()
+        #expect(try GoTemplate.render("{{json .Config}}", object: c) == #"{"Image":"postgres:16-alpine"}"#)
+        #expect(try GoTemplate.render("{{json .State.Running}}", object: c) == "true")
+        #expect(try GoTemplate.render("{{json .Nope}}", object: c) == "null")
     }
 }

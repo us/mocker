@@ -26,16 +26,16 @@ import Foundation
 /// would feed false data to the `grep`/`jq` pipelines these outputs drive, so the
 /// unsupported case must surface as a nonzero exit rather than wrong output.
 
-/// Raised when an `inspect --format` template uses a construct outside the supported
-/// `{{ .Dotted.Path }}` field-access subset.
+/// Raised when a `--format` template uses a construct outside the supported
+/// `{{ .Dotted.Path }}` field-access and `{{json .Path}}` subset.
 enum GoTemplateError: Error, LocalizedError, CustomStringConvertible {
     case unsupportedAction(String)
 
     var description: String {
         switch self {
         case .unsupportedAction(let block):
-            return "inspect --format: unsupported template action \(block); only field access "
-                + "like {{ .State.Running }} is supported (no if/range/pipelines/functions)"
+            return "--format: unsupported template action \(block); only field access "
+                + "like {{ .State.Running }} and {{json .}} are supported (no if/range/pipelines/other functions)"
         }
     }
 
@@ -70,25 +70,46 @@ enum GoTemplate {
         for match in actionRegex.matches(in: template, range: full) {
             guard let blockRange = Range(match.range, in: template) else { continue }
             let block = String(template[blockRange])
-            let path = try fieldPath(of: block)
+            let action = try parse(block)
             result += String(template[cursor..<blockRange.lowerBound])
-            result += resolveValue(path: path, in: object)
+            switch action {
+            case .field(let path):
+                result += resolveValue(path: path, in: object)
+            case .json(let path):
+                result += jsonString(resolveRaw(path: path, in: object))
+            }
             cursor = blockRange.upperBound
         }
         result += String(template[cursor...])
         return result
     }
 
-    /// Extract the dotted field path from one `{{…}}` block, or throw if the whole block is
-    /// not a supported `{{ .Path }}` field access.
-    private static func fieldPath(of block: String) throws -> [String] {
-        let whole = NSRange(block.startIndex..., in: block)
-        guard let match = fieldRegex.firstMatch(in: block, range: whole),
-              match.range.location == whole.location, match.range.length == whole.length,
-              let pathRange = Range(match.range(at: 1), in: block) else {
-            throw GoTemplateError.unsupportedAction(block)
+    private enum Action {
+        case field([String])
+        case json([String])
+    }
+
+    /// Parse one `{{…}}` block into a supported action, or throw if it is neither a
+    /// `{{ .Path }}` field access nor a `{{json .Path}}` call (`{{json .}}` is the whole object).
+    private static func parse(_ block: String) throws -> Action {
+        if let path = capture(fieldRegex, in: block) {
+            return .field(path.split(separator: ".").map(String.init))
         }
-        return block[pathRange].split(separator: ".").map(String.init)
+        if let path = capture(jsonRegex, in: block) {
+            return .json(path.split(separator: ".").map(String.init))
+        }
+        throw GoTemplateError.unsupportedAction(block)
+    }
+
+    /// Group 1 of `regex` when it matches the whole of `block`.
+    private static func capture(_ regex: NSRegularExpression, in block: String) -> String? {
+        let whole = NSRange(block.startIndex..., in: block)
+        guard let match = regex.firstMatch(in: block, range: whole),
+              match.range.location == whole.location, match.range.length == whole.length,
+              let range = Range(match.range(at: 1), in: block) else {
+            return nil
+        }
+        return String(block[range])
     }
 
     // Patterns are constant and valid, so compile once at first access. `[\s\S]` (not `.`)
@@ -97,19 +118,44 @@ enum GoTemplate {
     /// A supported `{{ .Dotted.Path }}` field access: optional surrounding whitespace, a
     /// leading dot, then a dotted identifier path.
     private static let fieldRegex = try! NSRegularExpression(pattern: #"\{\{\s*\.([A-Za-z0-9_.]+)\s*\}\}"#)
+    /// `{{json .Dotted.Path}}`; a bare `.` (empty path) selects the whole object.
+    private static let jsonRegex = try! NSRegularExpression(pattern: #"\{\{\s*json\s+\.([A-Za-z0-9_.]*)\s*\}\}"#)
 
     // MARK: - Path resolution
 
     /// Walk a dotted path through nested dictionaries, rendering the leaf as a scalar.
     private static func resolveValue(path: [String], in object: [String: Any]) -> String {
+        guard let value = resolveRaw(path: path, in: object) else { return "" }
+        return scalar(value)
+    }
+
+    /// The value at `path`, or nil when a key along the way is missing.
+    private static func resolveRaw(path: [String], in object: [String: Any]) -> Any? {
         var current: Any = object
         for key in path {
             guard let dict = current as? [String: Any], let next = dict[key] else {
-                return ""
+                return nil
             }
             current = next
         }
-        return scalar(current)
+        return current
+    }
+
+    /// Compact JSON with sorted keys and unescaped slashes, like Go's `json` function
+    /// applied to a map. A missing path renders `null`.
+    private static func jsonString(_ value: Any?) -> String {
+        guard let value, !(value is NSNull) else { return "null" }
+        if JSONSerialization.isValidJSONObject(value),
+           let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .withoutEscapingSlashes]),
+           let text = String(data: data, encoding: .utf8) {
+            return text
+        }
+        // Scalars are not valid top-level JSON objects for older Foundation; wrap and unwrap.
+        if let data = try? JSONSerialization.data(withJSONObject: [value], options: [.withoutEscapingSlashes]),
+           let text = String(data: data, encoding: .utf8), text.count >= 2 {
+            return String(text.dropFirst().dropLast())
+        }
+        return "null"
     }
 
     /// Render a JSON leaf the way Go's template prints it: bare `true`/`false`,

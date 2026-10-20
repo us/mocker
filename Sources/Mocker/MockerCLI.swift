@@ -29,6 +29,7 @@ struct MockerCLI: AsyncParsableCommand {
             Login.self,
             Logout.self,
             Version.self,
+            Info.self,
             Cp.self,
             Attach.self,
             Rename.self,

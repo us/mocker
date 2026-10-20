@@ -14,31 +14,40 @@ struct Version: AsyncParsableCommand {
     var format: String?
 
     func run() async throws {
-        let ver = Self.currentVersion
+        let object = Self.versionObject()
 
         if let format {
-            var output = format
-            output = output.replacingOccurrences(of: "{{.Client.Version}}", with: ver)
-            output = output.replacingOccurrences(of: "{{.Server.Version}}", with: ver)
-            output = output.replacingOccurrences(of: "{{.Client.Os}}", with: "darwin")
-            output = output.replacingOccurrences(of: "{{.Client.Arch}}", with: machineArch())
-            print(output)
-        } else {
-            print("Client:")
-            print(" Version:           \(ver)")
-            print(" API version:       1.47")
-            print(" OS/Arch:           darwin/\(machineArch())")
-            print(" Context:           mocker")
-            print("")
-            print("Server: Mocker Engine")
-            print(" Version:          \(ver)")
-            print(" API version:      1.47 (minimum version 1.24)")
-            print(" OS/Arch:          linux/\(machineArch())")
-            print(" Runtime:          Apple Containerization")
+            let template = format == "json" ? "{{json .}}" : format
+            print(try GoTemplate.render(template, object: object))
+            return
         }
+
+        // The text view reads the same record the templates see, so each value is set once.
+        func field(_ side: String, _ key: String) -> String {
+            ((object[side] as? [String: String]) ?? [:])[key] ?? ""
+        }
+        print("Client:")
+        print(" Version:           \(field("Client", "Version"))")
+        print(" API version:       \(field("Client", "ApiVersion"))")
+        print(" OS/Arch:           \(field("Client", "Os"))/\(field("Client", "Arch"))")
+        print(" Context:           mocker")
+        print("")
+        print("Server: Mocker Engine")
+        print(" Version:          \(field("Server", "Version"))")
+        print(" API version:      \(field("Server", "ApiVersion")) (minimum version 1.24)")
+        print(" OS/Arch:          \(field("Server", "Os"))/\(field("Server", "Arch"))")
+        print(" Runtime:          Apple Containerization")
     }
 
-    private func machineArch() -> String {
+    /// Docker-shaped `version` record for `--format` templates (`{{.Client.Version}}`, ...).
+    static func versionObject() -> [String: Any] {
+        func side(_ os: String) -> [String: String] {
+            ["Version": currentVersion, "ApiVersion": "1.47", "Os": os, "Arch": machineArch()]
+        }
+        return ["Client": side("darwin"), "Server": side("linux")]
+    }
+
+    private static func machineArch() -> String {
         #if arch(arm64)
         "arm64"
         #else

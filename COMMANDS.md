@@ -669,7 +669,19 @@ mocker version [OPTIONS]
 
 | Flag | Short | Description |
 |------|-------|-------------|
-| `--format` | `-f` | Format output using a custom template |
+| `--format` | `-f` | Format output using a custom template (`{{.Client.Version}}`, `{{.Server.Os}}`, `{{json .}}`) |
+
+### `mocker info`
+
+Display system-wide information. Alias for `mocker system info`.
+
+```
+mocker info [OPTIONS]
+```
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--format` | `-f` | Format output using a custom template (`{{.ServerVersion}}`, `{{.NCPU}}`, `{{json .}}`) |
 
 ---
 
@@ -838,7 +850,7 @@ mocker volume prune [OPTIONS]
 
 ### `mocker system info`
 
-Display system-wide information.
+Display system-wide information. Same as `mocker info`.
 
 ```
 mocker system info [OPTIONS]
@@ -846,7 +858,7 @@ mocker system info [OPTIONS]
 
 | Flag | Short | Description |
 |------|-------|-------------|
-| `--format` | `-f` | Format output using a custom template |
+| `--format` | `-f` | Format output using a custom template (`{{.ServerVersion}}`, `{{.NCPU}}`, `{{json .}}`) |
 
 ### `mocker system df`
 
