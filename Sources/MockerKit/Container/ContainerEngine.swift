@@ -73,6 +73,11 @@ public actor ContainerEngine {
         if let existing = try await store.findByName(name) {
             throw MockerError.containerAlreadyExists(existing.name)
         }
+        // One the runtime has but we do not (made outside mocker): recording it would let
+        // `mocker rm` delete someone else's container.
+        if (try? await runCLI(["inspect", name]))?.1 == 0 {
+            throw MockerError.containerAlreadyExists(name)
+        }
         return name
     }
 
@@ -381,6 +386,9 @@ public actor ContainerEngine {
                 let kill = Process()
                 kill.executableURL = URL(fileURLWithPath: cli)
                 kill.arguments = ["kill", "-s", label, name]
+                // It echoes the name; that must not land in the attached output.
+                kill.standardOutput = FileHandle.nullDevice
+                kill.standardError = FileHandle.nullDevice
                 try? kill.run()
             }
             source.resume()
