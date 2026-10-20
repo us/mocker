@@ -12,6 +12,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **image inspect:** `mocker image inspect` and `mocker inspect --type=image` now return Docker-compatible `ImageInspect` JSON arrays with PascalCase keys instead of the previous lowercase `ImageInfo` object shape.
 * **MockerKit:** `ImageManager.inspect(_:platform:)` returns `ImageInspect` instead of `ImageInfo`.
 
+## [0.9.7](https://github.com/us/mocker/compare/v0.9.6...v0.9.7) (2026-10-20)
+
+
+### Features
+
+* **completion:** add mocker completion bash|zsh|fish ([3fa3457](https://github.com/us/mocker/commit/3fa34570608606465311849b4da7fde63d33b64f))
+* **info:** add top-level info command with --format support ([2c550c8](https://github.com/us/mocker/commit/2c550c80ad21f2430cc138c7455a9186031bb4ef))
+
+
+### Bug Fixes
+
+* **run:** clean up failed attached runs, forward signals, fix compose run ([99b0c0f](https://github.com/us/mocker/commit/99b0c0f11b2905d13d0dd620c82a3d8a6dcc7c3d))
+* **run:** refuse a name the runtime already holds ([9f3b76a](https://github.com/us/mocker/commit/9f3b76a58bcd059a85ccde8ad326f98e81d6de18))
+* **run:** run attached containers in the foreground and return their exit code ([50c7bf6](https://github.com/us/mocker/commit/50c7bf6db48be0a3ee5d2656205a067df115ad1d))
+
 ## [0.9.6](https://github.com/us/mocker/compare/v0.9.5...v0.9.6) (2026-10-19)
 
 
