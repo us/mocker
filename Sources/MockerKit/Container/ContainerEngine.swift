@@ -41,12 +41,7 @@ public actor ContainerEngine {
     // MARK: - Run
 
     public func run(_ containerConfig: ContainerConfig) async throws -> ContainerInfo {
-        let name = containerConfig.name ?? generateName()
-
-        // Check for name conflicts in our store
-        if let existing = try await store.findByName(name) {
-            throw MockerError.containerAlreadyExists(existing.name)
-        }
+        let name = try await claimName(containerConfig)
 
         let args = Self.buildRunArguments(name: name, config: containerConfig)
 
@@ -70,6 +65,15 @@ public actor ContainerEngine {
         // left behind by an older mocker version.
 
         return info
+    }
+
+    /// The name a new container gets, or an error when our store already has one by that name.
+    private func claimName(_ containerConfig: ContainerConfig) async throws -> String {
+        let name = containerConfig.name ?? generateName()
+        if let existing = try await store.findByName(name) {
+            throw MockerError.containerAlreadyExists(existing.name)
+        }
+        return name
     }
 
     static func buildRunArguments(name: String, config containerConfig: ContainerConfig, attached: Bool = false) -> [String] {
@@ -311,24 +315,25 @@ public actor ContainerEngine {
     /// ponytail: polls every 0.5s and re-reads the whole log; add a streaming reader if that costs.
     public func followLogs(_ identifier: String, tail: Int? = nil) async throws {
         let container = try await resolve(identifier)
-        var printed = 0
-        var first = true
-        var finished = false
+        // Start from the tail, then print only what is new.
+        var printed = try await max(0, logs(container.name).count - (tail ?? Int.max))
         while true {
-            let lines = try await logs(container.name)
-            let from = first ? max(0, lines.count - (tail ?? lines.count)) : printed
-            for line in lines.dropFirst(from) { print(line) }
+            // Read the state before the log, so what was written just before an exit is not missed.
+            let running = await isRunning(container)
+            // A `--rm` container is gone from the runtime once it has exited, log and all.
+            guard let lines = running ? try await logs(container.name) : try? await logs(container.name) else { return }
+            for line in lines.dropFirst(printed) { print(line) }
             fflush(stdout)
             printed = lines.count
-            first = false
-            if finished { break }
-            // A failed listing counts as "still running"; Ctrl-C ends the wait.
-            if let live = await liveIDs(), !live.contains(container.name), !live.contains(container.id) {
-                finished = true // one more read for what was written just before the exit
-                continue
-            }
+            if !running { return }
             try await Task.sleep(nanoseconds: 500_000_000)
         }
+    }
+
+    /// A failed listing counts as running: it must not end a follow early.
+    private func isRunning(_ container: ContainerInfo) async -> Bool {
+        guard let live = await liveIDs() else { return true }
+        return live.contains(container.name) || live.contains(container.id)
     }
 
     /// Run a container in the foreground: the runtime's own `run` owns stdio (so `-i`/`-t`
@@ -336,10 +341,7 @@ public actor ContainerEngine {
     /// A `-d` run followed by polling the log cannot do that, since the runtime does not
     /// expose the exit code of a detached container.
     public func runAttached(_ containerConfig: ContainerConfig) async throws -> Int32 {
-        let name = containerConfig.name ?? generateName()
-        if let existing = try await store.findByName(name) {
-            throw MockerError.containerAlreadyExists(existing.name)
-        }
+        let name = try await claimName(containerConfig)
 
         // Recorded up front so ps/stop/kill see the container while the run is blocking.
         let record = ContainerInfo(
@@ -355,11 +357,47 @@ public actor ContainerEngine {
         let argv = [Self.containerCLI] + Self.buildRunArguments(name: name, config: containerConfig, attached: true)
         let cArgs: [UnsafeMutablePointer<CChar>?] = argv.map { strdup($0) } + [nil]
         defer { cArgs.forEach { free($0) } }
+
+        // Ctrl-C reaches the whole foreground group, child included, but this process must
+        // outlive the child to clean up after it. So SIGINT/SIGTERM are caught here and passed
+        // to the container itself, which is what Docker's --sig-proxy does: the runtime's own
+        // `run` does not forward them when there is no tty. The child gets the default action
+        // back (an ignored signal would otherwise survive the exec), so with a tty it still
+        // sees the keystroke directly.
+        var attr: posix_spawnattr_t?
+        posix_spawnattr_init(&attr)
+        defer { posix_spawnattr_destroy(&attr) }
+        var defaults = sigset_t()
+        sigemptyset(&defaults)
+        sigaddset(&defaults, SIGINT)
+        sigaddset(&defaults, SIGTERM)
+        posix_spawnattr_setsigdefault(&attr, &defaults)
+        posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETSIGDEF))
+
+        let forwarded = [(SIGINT, "INT"), (SIGTERM, "TERM")].map { (sig, label) -> DispatchSourceSignal in
+            signal(sig, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: sig, queue: .global())
+            source.setEventHandler { [cli = Self.containerCLI] in
+                let kill = Process()
+                kill.executableURL = URL(fileURLWithPath: cli)
+                kill.arguments = ["kill", "-s", label, name]
+                try? kill.run()
+            }
+            source.resume()
+            return source
+        }
+        defer {
+            forwarded.forEach { $0.cancel() }
+            signal(SIGINT, SIG_DFL)
+            signal(SIGTERM, SIG_DFL)
+        }
+
         var pid: pid_t = 0
-        guard posix_spawn(&pid, Self.containerCLI, nil, nil, cArgs, environ) == 0 else {
+        guard posix_spawn(&pid, Self.containerCLI, nil, &attr, cArgs, environ) == 0 else {
             try await store.delete(record.id)
             throw MockerError.operationFailed("failed to launch \(Self.containerCLI)")
         }
+
         // Standard streams are inherited from this process.
         let status: Int32 = await withCheckedContinuation { continuation in
             DispatchQueue.global().async {
@@ -370,7 +408,10 @@ public actor ContainerEngine {
             }
         }
 
-        if containerConfig.rm {
+        // A run that failed before the runtime created the container (unknown image, bad
+        // flag) leaves nothing to track; keeping the record would also block reusing the name.
+        let created = (try? await runCLI(["inspect", name]))?.1 == 0
+        if containerConfig.rm || !created {
             try await store.delete(record.id)
         } else {
             var done = record
