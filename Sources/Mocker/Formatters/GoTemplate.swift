@@ -144,18 +144,12 @@ enum GoTemplate {
     /// Compact JSON with sorted keys and unescaped slashes, like Go's `json` function
     /// applied to a map. A missing path renders `null`.
     private static func jsonString(_ value: Any?) -> String {
-        guard let value, !(value is NSNull) else { return "null" }
-        if JSONSerialization.isValidJSONObject(value),
-           let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .withoutEscapingSlashes]),
-           let text = String(data: data, encoding: .utf8) {
-            return text
-        }
-        // Scalars are not valid top-level JSON objects for older Foundation; wrap and unwrap.
-        if let data = try? JSONSerialization.data(withJSONObject: [value], options: [.withoutEscapingSlashes]),
-           let text = String(data: data, encoding: .utf8), text.count >= 2 {
-            return String(text.dropFirst().dropLast())
-        }
-        return "null"
+        // Validated wrapped, so a scalar passes too; serializing anything else raises, not throws.
+        guard let value, !(value is NSNull), JSONSerialization.isValidJSONObject([value]),
+              let data = try? JSONSerialization.data(
+                  withJSONObject: value, options: [.fragmentsAllowed, .sortedKeys, .withoutEscapingSlashes]),
+              let text = String(data: data, encoding: .utf8) else { return "null" }
+        return text
     }
 
     /// Render a JSON leaf the way Go's template prints it: bare `true`/`false`,
