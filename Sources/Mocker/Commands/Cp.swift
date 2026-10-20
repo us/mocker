@@ -27,23 +27,32 @@ struct Cp: AsyncParsableCommand {
         let engine = try ContainerEngine(config: config)
 
         // Parse source and destination: "container:path" or just "path"
-        let (srcContainer, srcPath) = parseCpArg(source)
-        let (dstContainer, dstPath) = parseCpArg(destination)
+        let (srcContainer, srcPath) = Self.parseCpArg(source)
+        let (dstContainer, dstPath) = Self.parseCpArg(destination)
 
-        if let containerName = srcContainer {
-            // Copy from container to host
-            let data = try await engine.copyFromContainer(containerName, path: srcPath)
-            try data.write(to: URL(fileURLWithPath: dstPath))
-        } else if let containerName = dstContainer {
-            // Copy from host to container
-            let data = try Data(contentsOf: URL(fileURLWithPath: srcPath))
-            try await engine.copyToContainer(containerName, path: dstPath, data: data)
-        } else {
+        switch (srcContainer, dstContainer) {
+        case (nil, nil):
             throw MockerError.operationFailed("copying requires one of source or destination to be a container")
+        case (.some, .some):
+            throw MockerError.operationFailed("copying between containers is not supported")
+        default:
+            break
         }
+
+        // `container cp` wants the runtime's container name; resolve Docker names,
+        // IDs and prefixes to it the same way every other command does.
+        let src = try await resolved(srcContainer, srcPath, engine)
+        let dst = try await resolved(dstContainer, dstPath, engine)
+        try await engine.copy(from: src, to: dst)
     }
 
-    private func parseCpArg(_ arg: String) -> (String?, String) {
+    private func resolved(_ container: String?, _ path: String, _ engine: ContainerEngine) async throws -> String {
+        guard let container else { return path }
+        return "\(try await engine.inspect(container).name):\(path)"
+    }
+
+    /// Split `container:path` from a plain host path. Pure; safe to unit-test.
+    static func parseCpArg(_ arg: String) -> (String?, String) {
         // Format: "container:path" or just "path"
         let parts = arg.split(separator: ":", maxSplits: 1).map(String.init)
         if parts.count == 2 && !parts[0].hasPrefix("/") && !parts[0].hasPrefix(".") {

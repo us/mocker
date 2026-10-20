@@ -1834,21 +1834,18 @@ struct ComposeCp: AsyncParsableCommand {
 
         let engine = try ContainerEngine(config: config)
 
-        // Parse service:path format
-        let parts = source.split(separator: ":", maxSplits: 1).map(String.init)
-        if parts.count == 2 && !parts[0].hasPrefix("/") && !parts[0].hasPrefix(".") {
-            // Copy from container
-            let containerName = "\(project)-\(parts[0])-\(index)"
-            let data = try await engine.copyFromContainer(containerName, path: parts[1])
-            try data.write(to: URL(fileURLWithPath: destination))
-        } else {
-            let dstParts = destination.split(separator: ":", maxSplits: 1).map(String.init)
-            if dstParts.count == 2 && !dstParts[0].hasPrefix("/") {
-                let containerName = "\(project)-\(dstParts[0])-\(index)"
-                let data = try Data(contentsOf: URL(fileURLWithPath: source))
-                try await engine.copyToContainer(containerName, path: dstParts[1], data: data)
-            }
+        // `service:path` on either side; the service maps to its `<index>` container.
+        let (srcService, srcPath) = Cp.parseCpArg(source)
+        let (dstService, dstPath) = Cp.parseCpArg(destination)
+        guard srcService != nil || dstService != nil else {
+            throw MockerError.operationFailed("copying requires one of source or destination to be a service")
         }
+        func side(_ service: String?, _ path: String) async throws -> String {
+            guard let service else { return path }
+            let containerName = "\(project)-\(service)-\(index)"
+            return "\(try await engine.inspect(containerName).name):\(path)"
+        }
+        try await engine.copy(from: try await side(srcService, srcPath), to: try await side(dstService, dstPath))
     }
 }
 

@@ -564,38 +564,16 @@ public actor ContainerEngine {
 
     // MARK: - Copy
 
-    public func copyFromContainer(_ identifier: String, path: String) async throws -> Data {
-        let container = try await resolve(identifier)
-        let (output, exitCode) = try await runCLI(["exec", container.name, "cat", path])
+    /// Copy between the host and a container through `container cp`, which handles
+    /// directories, binary content and `dir/` destinations natively. The container side
+    /// of `source`/`destination` is `<runtime name>:<path>`; the other side is a host path.
+    public func copy(from source: String, to destination: String) async throws {
+        let (output, exitCode) = try await runCLI(["cp", source, destination])
         guard exitCode == 0 else {
-            throw MockerError.operationFailed("failed to read \(path) from container \(identifier)")
-        }
-        return Data(output.utf8)
-    }
-
-    public func copyToContainer(_ identifier: String, path: String, data: Data) async throws {
-        let container = try await resolve(identifier)
-        // Write data via stdin pipe to tee — avoids shell interpolation (injection-safe)
-        let content = String(data: data, encoding: .utf8) ?? ""
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: Self.containerCLI)
-        process.arguments = ["exec", "-i", container.name, "tee", "--", path]
-        let inputPipe = Pipe()
-        process.standardInput = inputPipe
-        // Discard tee stdout (it echoes input) — use /dev/null to avoid pipe-buffer hang
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        inputPipe.fileHandleForWriting.write(Data(content.utf8))
-        inputPipe.fileHandleForWriting.closeFile()
-        // Use async-safe termination handler instead of blocking waitUntilExit
-        let exitCode = await withCheckedContinuation { (continuation: CheckedContinuation<Int32, Never>) in
-            process.terminationHandler = { p in
-                continuation.resume(returning: p.terminationStatus)
-            }
-        }
-        guard exitCode == 0 else {
-            throw MockerError.operationFailed("failed to write to \(path) in container \(identifier)")
+            // The CLI's own "Error: " lead-in would otherwise be printed twice.
+            var message = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            if message.hasPrefix("Error: ") { message.removeFirst("Error: ".count) }
+            throw MockerError.operationFailed(message)
         }
     }
 
