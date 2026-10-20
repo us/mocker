@@ -432,22 +432,55 @@ public actor ContainerEngine {
 
     // MARK: - Exec
 
-    public func exec(_ identifier: String, command: [String], interactive: Bool = false, tty: Bool = false) async throws {
+    /// Argument vector for `container exec`. Pure, so the flag forwarding is unit-testable.
+    static func makeExecArguments(
+        name: String, command: [String], interactive: Bool = false, tty: Bool = false,
+        detach: Bool = false, env: [String] = [], envFiles: [String] = [],
+        user: String? = nil, workdir: String? = nil
+    ) -> [String] {
+        var args = ["exec"]
+        if interactive { args.append("-i") }
+        if tty { args.append("-t") }
+        if detach { args.append("-d") }
+        for e in env { args += ["-e", e] }
+        for f in envFiles { args += ["--env-file", f] }
+        if let user { args += ["-u", user] }
+        if let workdir { args += ["-w", workdir] }
+        args.append(name)
+        args += command
+        return args
+    }
+
+    /// Run `command` in a running container on the caller's stdio and return its exit status.
+    ///
+    /// The process inherits the terminal instead of going through `runCLI`, which held
+    /// stdout until exit, dropped stderr whenever stdout was non-empty, and made
+    /// `exec -it sh` unusable. The status is returned rather than flattened into an
+    /// error so the CLI can exit with the command's own code, as `docker exec` does.
+    @discardableResult
+    public func exec(
+        _ identifier: String, command: [String], interactive: Bool = false, tty: Bool = false,
+        detach: Bool = false, env: [String] = [], envFiles: [String] = [],
+        user: String? = nil, workdir: String? = nil
+    ) async throws -> Int32 {
         let container = try await resolve(identifier)
         guard container.state == .running else {
             throw MockerError.containerNotRunning(identifier)
         }
 
-        var args = ["exec"]
-        if interactive { args.append("-i") }
-        if tty { args.append("-t") }
-        args.append(container.name)
-        args += command
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: Self.containerCLI)
+        process.arguments = Self.makeExecArguments(
+            name: container.name, command: command, interactive: interactive, tty: tty,
+            detach: detach, env: env, envFiles: envFiles, user: user, workdir: workdir
+        )
+        process.standardInput = FileHandle.standardInput
+        process.standardOutput = FileHandle.standardOutput
+        process.standardError = FileHandle.standardError
+        try process.run()
 
-        let (output, exitCode) = try await runCLI(args)
-        if !output.isEmpty { print(output) }
-        if exitCode != 0 {
-            throw MockerError.operationFailed("exec failed with exit code \(exitCode)")
+        return await withCheckedContinuation { continuation in
+            process.terminationHandler = { continuation.resume(returning: $0.terminationStatus) }
         }
     }
 

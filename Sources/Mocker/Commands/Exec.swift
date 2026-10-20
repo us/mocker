@@ -49,6 +49,11 @@ struct Exec: AsyncParsableCommand {
     func run() async throws {
         let config = MockerConfig()
         let engine = try ContainerEngine(config: config)
-        try await engine.exec(container, command: command, interactive: interactive, tty: tty)
+        let status = try await engine.exec(
+            container, command: command, interactive: interactive, tty: tty, detach: detach,
+            env: env, envFiles: envFile, user: user, workdir: workdir
+        )
+        // Exit with the command's own status, as `docker exec` does.
+        if status != 0 { throw ExitCode(status) }
     }
 }

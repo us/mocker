@@ -924,7 +924,11 @@ struct ComposeExec: AsyncParsableCommand {
         }
 
         let engine = try ContainerEngine(config: config)
-        try await engine.exec(containerName, command: command, interactive: interactive, tty: tty)
+        let status = try await engine.exec(
+            containerName, command: command, interactive: interactive, tty: tty, detach: detach,
+            env: env, user: user, workdir: workdir
+        )
+        if status != 0 { throw ExitCode(status) }
     }
 }
 
