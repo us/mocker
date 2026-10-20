@@ -530,6 +530,8 @@ public struct ComposeService: Sendable {
     public var labels: [String: String]
     public var hostname: String?
     public var workingDir: String?
+    /// `platform:` (e.g. `linux/amd64`), forwarded to the pull and the run.
+    public var platform: String?
 
     // Resource limits — Docker Compose spec (legacy top-level + deploy.resources)
     public var memLimit: String?
@@ -547,7 +549,7 @@ public struct ComposeService: Sendable {
 
     private enum HashCodingKeys: String, CodingKey {
         case name, image, command, entrypoint, environment, ports, volumes, networks
-        case restart, labels, hostname, workingDir
+        case restart, labels, hostname, workingDir, platform
         case memLimit, cpus, memReservation, cpusReservation, memSwapLimit
         case shmSize, pidsLimit
         case restartPolicyDelay, restartPolicyMaxAttempts, restartPolicyWindow
@@ -643,6 +645,7 @@ public struct ComposeService: Sendable {
             labels: labels,
             hostname: dict["hostname"] as? String,
             workingDir: dict["working_dir"] as? String,
+            platform: dict["platform"] as? String,
             memLimit: memLimit,
             cpus: cpus,
             memReservation: memReservation,
@@ -681,6 +684,7 @@ public struct ComposeService: Sendable {
             labels: labels.merging(other.labels) { _, new in new },
             hostname: other.hostname ?? hostname,
             workingDir: other.workingDir ?? workingDir,
+            platform: other.platform ?? platform,
             memLimit: other.memLimit ?? memLimit,
             cpus: other.cpus ?? cpus,
             memReservation: other.memReservation ?? memReservation,
@@ -860,6 +864,7 @@ extension ComposeService: Encodable {
         try c.encode(labels, forKey: .labels)
         try c.encodeIfPresent(hostname, forKey: .hostname)
         try c.encodeIfPresent(workingDir, forKey: .workingDir)
+        try c.encodeIfPresent(platform, forKey: .platform)
         try c.encodeIfPresent(memLimit, forKey: .memLimit)
         try c.encodeIfPresent(cpus, forKey: .cpus)
         try c.encodeIfPresent(memReservation, forKey: .memReservation)

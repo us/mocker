@@ -794,7 +794,7 @@ struct ComposePull: AsyncParsableCommand {
             guard let image = service.image else { continue }
             do {
                 if !quiet { print("Pulling \(name) (\(image))...") }
-                _ = try await manager.pull(image)
+                _ = try await manager.pull(image, platform: service.platform)
                 if !quiet { print("Pulled \(name)") }
             } catch {
                 if ignorePullFailures {

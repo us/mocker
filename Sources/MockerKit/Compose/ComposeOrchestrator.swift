@@ -565,7 +565,9 @@ public actor ComposeOrchestrator {
         // both `image:` and `build:` is built and tagged with `image:` — not pulled.
         switch service.resolveImageSource(projectName: projectName, noBuild: noBuild) {
         case .pull(let image):
-            _ = try await imageManager.pull(image)
+            // Without the platform the pull fetches the host's variant and the run
+            // (`--os/--arch` from `platform:`) then finds no matching image.
+            _ = try await imageManager.pull(image, platform: service.platform)
         case .build(let tag, let build):
             // Skip the rebuild only when `--build` wasn't requested and the image exists.
             var shouldBuild = forceBuild
@@ -642,6 +644,7 @@ public actor ComposeOrchestrator {
             hostname: service.hostname,
             restartPolicy: service.restart.flatMap { RestartPolicy(rawValue: $0) } ?? .no,
             entrypoint: exec.entrypoint,
+            platform: service.platform,
             // `restartPolicy` and `shmSize` (like the soft mem/cpu reservations) are stored on the
             // config for Docker surface parity, mirroring `run`/`create`. Apple's `container` CLI
             // currently exposes no `--restart`/`--shm-size` flags, so these are NOT enforced by the
