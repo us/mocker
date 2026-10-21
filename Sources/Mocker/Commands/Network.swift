@@ -109,15 +109,12 @@ struct NetworkList: AsyncParsableCommand {
         let manager = try NetworkManager(config: config)
         var networks = try await manager.list()
 
-        for f in filter {
-            let parts = f.split(separator: "=", maxSplits: 1)
-            guard parts.count == 2 else { continue }
-            let key = String(parts[0]), value = String(parts[1])
-            switch key {
-            case "name": networks = networks.filter { $0.name.contains(value) }
-            case "driver": networks = networks.filter { $0.driver == value }
-            case "id": networks = networks.filter { $0.id.hasPrefix(value) }
-            default: break
+        for f in try ListFilter.parse(filter, supported: ["name", "driver", "id"]) {
+            switch f.key {
+            case "name": networks = networks.filter { $0.name.contains(f.value) }
+            case "driver": networks = networks.filter { $0.driver == f.value }
+            case "id": networks = networks.filter { $0.id.hasPrefix(f.value) }
+            default: break  // unreachable: `parse` rejected every other key
             }
         }
 

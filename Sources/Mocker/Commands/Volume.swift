@@ -70,14 +70,11 @@ struct VolumeList: AsyncParsableCommand {
         let manager = try VolumeManager(config: config)
         var volumes = try await manager.list()
 
-        for f in filter {
-            let parts = f.split(separator: "=", maxSplits: 1)
-            guard parts.count == 2 else { continue }
-            let key = String(parts[0]), value = String(parts[1])
-            switch key {
-            case "name": volumes = volumes.filter { $0.name.contains(value) }
-            case "driver": volumes = volumes.filter { $0.driver == value }
-            default: break
+        for f in try ListFilter.parse(filter, supported: ["name", "driver"]) {
+            switch f.key {
+            case "name": volumes = volumes.filter { $0.name.contains(f.value) }
+            case "driver": volumes = volumes.filter { $0.driver == f.value }
+            default: break  // unreachable: `parse` rejected every other key
             }
         }
 

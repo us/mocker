@@ -282,10 +282,10 @@ struct CLITests {
             ImageInfo(id: "b", repository: "redis", tag: "7", labels: ["env": "dev"]),
         ]
         let byRef = try ImageLs.parse(["--filter", "reference=nginx"]).options
-        #expect(byRef.filtered(images).map(\.id) == ["a"])
+        #expect(try byRef.filtered(images).map(\.id) == ["a"])
 
         let byLabel = try ImageLs.parse(["--filter", "label=env=dev"]).options
-        #expect(byLabel.filtered(images).map(\.id) == ["b"])
+        #expect(try byLabel.filtered(images).map(\.id) == ["b"])
     }
 
     @Test("image ls --format substitutes repository, tag and labels")
@@ -318,10 +318,10 @@ struct CLITests {
             ContainerInfo(id: "b", name: "db", image: "redis", state: .exited, status: "Exited", created: .distantPast),
         ]
         let byStatus = try ContainerLs.parse(["--filter", "status=running"]).options
-        #expect(byStatus.filtered(containers).map(\.id) == ["a"])
+        #expect(try byStatus.filtered(containers).map(\.id) == ["a"])
 
         let byName = try ContainerLs.parse(["--filter", "name=db"]).options
-        #expect(byName.filtered(containers).map(\.id) == ["b"])
+        #expect(try byName.filtered(containers).map(\.id) == ["b"])
     }
 
     @Test("Build -f flag parses to the provided path")

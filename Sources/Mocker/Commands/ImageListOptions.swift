@@ -29,7 +29,7 @@ struct ImageListOptions: ParsableArguments {
         // up when ImageManager surfaces that data.
         let config = MockerConfig()
         let manager = try ImageManager(config: config)
-        let images = filtered(try await manager.list())
+        let images = try filtered(try await manager.list())
 
         if quiet {
             for image in images {
@@ -72,28 +72,42 @@ struct ImageListOptions: ParsableArguments {
     }
 
     /// Apply Docker-style `--filter` predicates. Pure; safe to unit-test.
-    func filtered(_ images: [ImageInfo]) -> [ImageInfo] {
+    func filtered(_ images: [ImageInfo]) throws -> [ImageInfo] {
         var images = images
-        for f in filter {
-            let parts = f.split(separator: "=", maxSplits: 1)
-            guard parts.count == 2 else { continue }
-            let key = String(parts[0])
-            let value = String(parts[1])
-            switch key {
+        for f in try ListFilter.parse(filter, supported: ["dangling", "reference", "label"]) {
+            switch f.key {
+            case "dangling":
+                // The store names every image (an untagged build gets a UUID), so nothing
+                // is dangling — which is what `rmi $(images -qf dangling=true)` needs.
+                if f.value == "true" { images = [] }
             case "reference":
-                // Docker matches a bare repo (any tag) or an exact repo:tag. Glob (`*`) is not supported.
-                images = images.filter { $0.repository == value || $0.reference == value }
+                // Docker matches a bare repo (any tag) or an exact repo:tag, by the name
+                // it shows: a pulled `alpine` is stored as `docker.io/library/alpine`.
+                // Glob (`*`) is not supported.
+                images = images.filter { image in
+                    [image.repository, Self.familiar(image.repository)].contains {
+                        $0 == f.value || "\($0):\(image.tag)" == f.value
+                    }
+                }
             case "label":
-                let labelParts = value.split(separator: "=", maxSplits: 1)
+                let labelParts = f.value.split(separator: "=", maxSplits: 1)
                 if labelParts.count == 2 {
                     images = images.filter { $0.labels[String(labelParts[0])] == String(labelParts[1]) }
                 } else {
-                    images = images.filter { $0.labels[value] != nil }
+                    images = images.filter { $0.labels[f.value] != nil }
                 }
             default:
-                break
+                break  // unreachable: `parse` rejected every other key
             }
         }
         return images
+    }
+
+    /// `alpine` for `docker.io/library/alpine`, `acme/app` for `docker.io/acme/app`.
+    private static func familiar(_ repository: String) -> String {
+        for prefix in ["docker.io/library/", "docker.io/"] where repository.hasPrefix(prefix) {
+            return String(repository.dropFirst(prefix.count))
+        }
+        return repository
     }
 }

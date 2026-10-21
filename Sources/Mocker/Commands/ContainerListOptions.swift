@@ -33,7 +33,7 @@ struct ContainerListOptions: ParsableArguments {
         let engine = try ContainerEngine(config: config)
         // --latest / --last include all states regardless of --all (matches Docker).
         let includeAll = all || latest || last != nil
-        var containers = filtered(try await engine.list(all: includeAll))
+        var containers = try filtered(try await engine.list(all: includeAll))
 
         if latest {
             containers = Array(containers.prefix(1))
@@ -81,14 +81,11 @@ struct ContainerListOptions: ParsableArguments {
     }
 
     /// Apply Docker-style `--filter` predicates. Pure; safe to unit-test.
-    func filtered(_ containers: [ContainerInfo]) -> [ContainerInfo] {
+    func filtered(_ containers: [ContainerInfo]) throws -> [ContainerInfo] {
         var containers = containers
-        for f in filter {
-            let parts = f.split(separator: "=", maxSplits: 1)
-            guard parts.count == 2 else { continue }
-            let key = String(parts[0])
-            let value = String(parts[1])
-            switch key {
+        for f in try ListFilter.parse(filter, supported: ["name", "status", "id", "label", "ancestor"]) {
+            let value = f.value
+            switch f.key {
             case "name":
                 containers = containers.filter { $0.name.contains(value) }
             case "status":
@@ -105,7 +102,7 @@ struct ContainerListOptions: ParsableArguments {
             case "ancestor":
                 containers = containers.filter { $0.image == value || $0.image.hasPrefix(value) }
             default:
-                break
+                break  // unreachable: `parse` rejected every other key
             }
         }
         return containers
