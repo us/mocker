@@ -12,6 +12,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **image inspect:** `mocker image inspect` and `mocker inspect --type=image` now return Docker-compatible `ImageInspect` JSON arrays with PascalCase keys instead of the previous lowercase `ImageInfo` object shape.
 * **MockerKit:** `ImageManager.inspect(_:platform:)` returns `ImageInspect` instead of `ImageInfo`.
 
+## [0.9.9](https://github.com/us/mocker/compare/v0.9.8...v0.9.9) (2026-10-25)
+
+
+### Bug Fixes
+
+* **compose:** use a local image given by ID instead of pulling it ([5f7cf44](https://github.com/us/mocker/commit/5f7cf445b8419d9a47f46defa97119deac849da0))
+* **compose:** use a local image ID with a platform, never fail a pull ([8e51216](https://github.com/us/mocker/commit/8e512166bda1a9bcf4fb36de03efdd7efe032f0e))
+* **ps:** honor name candidate order and ID case in ancestor= ([8187c62](https://github.com/us/mocker/commit/8187c625f8db3ca9aa974eef1cda8607720b1f11))
+* **ps:** match `--filter ancestor=` by image, not by the text that started the container ([5c9c678](https://github.com/us/mocker/commit/5c9c678f6f4997ce488347fbd2e8664c60931098))
+* **ps:** resolve ancestor= by name first, then by ID, like rmi and run ([726e110](https://github.com/us/mocker/commit/726e110ae1b865153e65feb99b77da77539c9da4))
+* **rmi:** refuse an ID shared by several tags unless forced, as Docker does ([ac8e1a7](https://github.com/us/mocker/commit/ac8e1a7040725b655c963137e884ca16add3f796))
+* **run:** accept an image ID where an image name goes, as Docker does ([e242131](https://github.com/us/mocker/commit/e24213118075e1eb68c3823c7686afbd160f9836))
+
 ## [0.9.8](https://github.com/us/mocker/compare/v0.9.7...v0.9.8) (2026-10-25)
 
 
