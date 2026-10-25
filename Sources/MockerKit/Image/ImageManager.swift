@@ -133,7 +133,7 @@ public actor ImageManager {
 
     /// Docker's "dangling" is an image with no name. The store names every image, and an
     /// untagged `mocker build` gets a UUID, so that is what dangling looks like here.
-    static func isDangling(_ image: ImageInfo) -> Bool {
+    public static func isDangling(_ image: ImageInfo) -> Bool {
         var name = image.repository
         if name.hasPrefix("docker.io/library/") { name.removeFirst("docker.io/library/".count) }
         return image.tag == "latest" && UUID(uuidString: name) != nil

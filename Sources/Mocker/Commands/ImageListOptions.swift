@@ -77,9 +77,15 @@ struct ImageListOptions: ParsableArguments {
         for f in try ListFilter.parse(filter, supported: ["dangling", "reference", "label"]) {
             switch f.key {
             case "dangling":
-                // The store names every image (an untagged build gets a UUID), so nothing
-                // is dangling — which is what `rmi $(images -qf dangling=true)` needs.
-                if f.value == "true" { images = [] }
+                // The same set `image prune` removes, so `rmi $(images -qf dangling=true)`
+                // deletes only untagged builds. Any other value must fail rather than match all.
+                let dangling: Bool
+                switch f.value.lowercased() {
+                case "true", "1": dangling = true
+                case "false", "0": dangling = false
+                default: throw MockerError.operationFailed("invalid filter 'dangling=\(f.value)'")
+                }
+                images = images.filter { ImageManager.isDangling($0) == dangling }
             case "reference":
                 // Docker matches a bare repo (any tag) or an exact repo:tag, by the name
                 // it shows: a pulled `alpine` is stored as `docker.io/library/alpine`.
