@@ -466,12 +466,9 @@ public actor ContainerEngine {
         }
 
         // Ctrl-C reaches the child directly (same foreground group); this process only waits.
+        // SIGTERM is left alone: sent to mocker alone (`timeout`, a CI cancel) it must still stop it.
         signal(SIGINT, SIG_IGN)
-        signal(SIGTERM, SIG_IGN)
-        defer {
-            signal(SIGINT, SIG_DFL)
-            signal(SIGTERM, SIG_DFL)
-        }
+        defer { signal(SIGINT, SIG_DFL) }
         return try await Self.spawnForeground(Self.makeExecArguments(
             name: container.name, command: command, interactive: interactive, tty: tty,
             detach: detach, env: env, envFiles: envFiles, user: user, workdir: workdir
