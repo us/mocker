@@ -1845,6 +1845,9 @@ struct ComposeCp: AsyncParsableCommand {
         guard srcService != nil || dstService != nil else {
             throw MockerError.operationFailed("copying requires one of source or destination to be a service")
         }
+        guard srcService == nil || dstService == nil else {
+            throw MockerError.operationFailed("copying between containers is not supported")
+        }
         func side(_ service: String?, _ path: String) async throws -> String {
             guard let service else { return path }
             let containerName = "\(project)-\(service)-\(index)"

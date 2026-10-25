@@ -635,7 +635,7 @@ public actor ContainerEngine {
             // The CLI's own "Error: " lead-in would otherwise be printed twice.
             var message = output.trimmingCharacters(in: .whitespacesAndNewlines)
             if message.hasPrefix("Error: ") { message.removeFirst("Error: ".count) }
-            throw MockerError.operationFailed(message)
+            throw MockerError.operationFailed(message.isEmpty ? "container cp failed with exit code \(exitCode)" : message)
         }
     }
 
