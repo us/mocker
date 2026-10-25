@@ -308,6 +308,10 @@ mocker ps [OPTIONS]
 | `--latest` | `-l` | Show the latest created container |
 | `--size` | `-s` | Display total file sizes |
 
+Filters: `name`, `status`, `id`, `label` and `ancestor`. `ancestor=` takes a name, `name:tag`
+or image ID and matches the image itself, however the container was started (`alpine:3.20`,
+`docker.io/library/alpine:3.20` or the ID all find it); a bare name means `:latest`, as in Docker.
+
 ### `mocker exec`
 
 Execute a command in a running container.
