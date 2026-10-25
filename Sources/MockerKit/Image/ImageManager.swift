@@ -126,6 +126,59 @@ public actor ImageManager {
         return info
     }
 
+    // MARK: - Prune
+
+    /// Images the runtime itself depends on; never the user's to prune.
+    static let runtimeImagePrefixes = ["ghcr.io/apple/containerization/", "ghcr.io/apple/container-builder-shim/"]
+
+    /// Docker's "dangling" is an image with no name. The store names every image, and an
+    /// untagged `mocker build` gets a UUID, so that is what dangling looks like here.
+    static func isDangling(_ image: ImageInfo) -> Bool {
+        var name = image.repository
+        if name.hasPrefix("docker.io/library/") { name.removeFirst("docker.io/library/".count) }
+        return image.tag == "latest" && UUID(uuidString: name) != nil
+    }
+
+    /// What `prune` removes: dangling images, or with `all` every image no container uses.
+    /// Pure, so the selection can be tested without a store.
+    /// - Parameter inUse: image references the way containers spell them (name, name:tag or ID).
+    static func pruneCandidates(_ images: [ImageInfo], all: Bool, inUse: [String]) -> [ImageInfo] {
+        images.filter { image in
+            if runtimeImagePrefixes.contains(where: { image.repository.hasPrefix($0) }) { return false }
+            guard all else { return isDangling(image) }
+            return !inUse.contains { matches(image, reference: $0) }
+        }
+    }
+
+    /// Whether `reference` — `alpine`, `alpine:3.20`, `docker.io/library/alpine:3.20` or an
+    /// ID prefix — names `image`.
+    static func matches(_ image: ImageInfo, reference: String) -> Bool {
+        if looksLikeDigest(reference), digestBody(image.id).hasPrefix(digestBody(reference)) { return true }
+        guard let ref = try? ImageReference.parse(reference) else { return false }
+        return image.tag == ref.tag
+            && (image.repository == ref.fullRepository || image.repository.hasSuffix("/\(ref.repository)"))
+    }
+
+    /// Remove dangling images, or with `all` every image not in `inUse`, then let the
+    /// runtime drop the blobs nothing references any more.
+    /// - Returns: the images removed and the bytes their digests freed (a digest another
+    ///   name still points at frees nothing).
+    public func prune(all: Bool, inUse: [String]) async throws -> (removed: [ImageInfo], reclaimed: UInt64) {
+        var removed: [ImageInfo] = []
+        for image in Self.pruneCandidates(try await list(), all: all, inUse: inUse) {
+            removed.append(try await remove(image.reference))
+        }
+        // Orphaned blobs are garbage-collected by the CLI; the store API does not expose that.
+        _ = try await RealProcessRunner().run(executable: Self.containerCLI, arguments: ["image", "prune"])
+
+        let remaining = Set(try await list(enrich: false).map(\.id))
+        var counted: Set<String> = []
+        let reclaimed = removed
+            .filter { !remaining.contains($0.id) && counted.insert($0.id).inserted }
+            .reduce(UInt64(0)) { $0 + ($1.size ?? 0) }
+        return (removed, reclaimed)
+    }
+
     // MARK: - Tag
 
     /// Tag an image with a new reference.

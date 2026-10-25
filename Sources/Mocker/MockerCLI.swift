@@ -47,6 +47,7 @@ struct MockerCLI: AsyncParsableCommand {
             Import.self,
             Search.self,
             ContainerCommand.self,
+            BuilderCommand.self,
             ImageCommand.self,
             ManifestCommand.self,
             NetworkCommand.self,

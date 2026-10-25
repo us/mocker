@@ -139,6 +139,21 @@ public actor NetworkManager {
 
     /// Networks the runtime owns and that must never be pruned, identified the way the
     /// runtime itself marks them rather than by guessing at names.
+    /// Remove every network no container uses. The runtime's built-in network stays:
+    /// pruning it would break every container that does not name a network.
+    /// - Returns: the names actually removed. A network with containers attached is
+    ///   refused by the runtime and skipped, so it is not reported as deleted.
+    public func prune() async throws -> [String] {
+        var removed: [String] = []
+        for network in try await list() where !Self.isBuiltIn(network)
+            && !["bridge", "host", "none"].contains(network.name) {
+            if (try? await remove(network.name)) != nil {
+                removed.append(network.name)
+            }
+        }
+        return removed
+    }
+
     public static func isBuiltIn(_ network: NetworkInfo) -> Bool {
         network.labels["com.apple.container.resource.role"] == "builtin" || network.name == "default"
     }

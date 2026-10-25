@@ -152,17 +152,19 @@ struct SystemPrune: AsyncParsableCommand {
     var filter: [String] = []
 
     func run() async throws {
+        // Pruning more than the filter asks for would delete data the user meant to keep.
+        guard filter.isEmpty else {
+            throw MockerError.operationFailed("system prune --filter is not supported")
+        }
         if !force {
             print("WARNING! This will remove:")
             print("  - all stopped containers")
-            if all {
-                print("  - all unused images")
-            } else {
-                print("  - all dangling images")
-            }
+            print("  - all networks not used by at least one container")
             if volumes {
-                print("  - all unused volumes")
+                print("  - all anonymous volumes not used by at least one container")
             }
+            print(all ? "  - all images without at least one container associated to them" : "  - all dangling images")
+            print(all ? "  - all build cache" : "  - unused build cache")
             print("")
             print("Are you sure you want to continue? [y/N] ", terminator: "")
 
@@ -175,16 +177,37 @@ struct SystemPrune: AsyncParsableCommand {
         let config = MockerConfig()
         let engine = try ContainerEngine(config: config)
 
-        // Remove stopped containers
         let containers = try await engine.list(all: true)
-        var removedContainers = 0
+        var deletedContainers: [String] = []
         for container in containers where !container.state.isActive {
-            _ = try await engine.remove(container.id)
-            removedContainers += 1
+            deletedContainers.append(try await engine.remove(container.id).name)
+        }
+        Self.report("Deleted Containers:", deletedContainers)
+
+        Self.report("Deleted Networks:", try await NetworkManager(config: config).prune())
+
+        if volumes {
+            Self.report("Deleted Volumes:", try await VolumeManager(config: config).prune(all: false))
         }
 
-        print("Deleted \(removedContainers) containers")
-        print("Total reclaimed space: 0B")
+        // Only the containers still present keep their images.
+        let inUse = containers.filter { $0.state.isActive }.map(\.image)
+        let images = try await ImageManager(config: config).prune(all: all, inUse: inUse)
+        ImagePrune.report(images.removed)
+
+        // The builder's cache cannot be pruned in part (see `BuildCache`), so it goes
+        // whole in both modes; a build only loses time to it, never data.
+        let cache = try await BuildCache.prune()
+        if cache > 0 { print("Deleted build cache\n") }
+
+        print("Total reclaimed space: \(ImagePrune.bytes(images.reclaimed + cache))")
+    }
+
+    private static func report(_ title: String, _ names: [String]) {
+        guard !names.isEmpty else { return }
+        print(title)
+        for name in names { print(name) }
+        print("")
     }
 }
 
