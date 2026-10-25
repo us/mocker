@@ -26,9 +26,10 @@ public actor ImageManager {
            let existing = try? await imageStore.get(reference: normalized) {
             return (await Self.toImageInfo(existing), true)
         }
-        // A local image ID (compose `image: d9e853e87e55`) is that image; as a name it
-        // would be pulled as `docker.io/library/d9e853e87e55:latest`.
-        if parsedPlatform == nil, let name = try await name(forID: reference),
+        // A local image ID (compose `image: d9e853e87e55`) is that image, platform or not: as
+        // a name it would be pulled as `docker.io/library/d9e853e87e55:latest`. An ambiguous
+        // or unknown hex string falls through to the registry, as `docker pull` does.
+        if let name = try? await name(forID: reference),
            let existing = try? await imageStore.get(reference: name) {
             return (await Self.toImageInfo(existing), true)
         }
