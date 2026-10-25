@@ -192,9 +192,21 @@ public actor ImageManager {
     /// and a bare `alpine` means `alpine:latest`, as in Docker. An ID prefix shared by two
     /// images names neither. Pure, so the matching can be tested without a store.
     public static func isAncestor(_ reference: String, of containerImage: String, in images: [ImageInfo]) -> Bool {
-        let wanted = Set(images.filter { matches($0, reference: reference) }.map(\.id))
-        guard wanted.count == 1 else { return false }
-        return images.contains { wanted.contains($0.id) && matches($0, reference: containerImage) }
+        let wanted = imageID(reference, in: images), actual = imageID(containerImage, in: images)
+        // An image deleted since the container started is only found by the name it ran.
+        guard let wanted, let actual else { return containerImage == reference }
+        return actual == wanted
+    }
+
+    /// ID of the one image `reference` names, looked up like `resolve` does: as a name
+    /// first (as typed, with `:latest`, registry-qualified), so `nginx` never means
+    /// `bitnami/nginx`, then as an ID prefix, which must name a single image.
+    static func imageID(_ reference: String, in images: [ImageInfo]) -> String? {
+        let names = resolutionCandidates(reference)
+        if let image = images.first(where: { names.contains($0.reference) }) { return image.id }
+        guard looksLikeDigest(reference) else { return nil }
+        let ids = Set(images.filter { digestBody($0.id).hasPrefix(digestBody(reference)) }.map(\.id))
+        return ids.count == 1 ? ids.first : nil
     }
 
     /// Remove dangling images, or with `all` every image not in `inUse`, then let the

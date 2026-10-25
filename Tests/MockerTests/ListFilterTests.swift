@@ -47,6 +47,7 @@ struct ListFilterTests {
         ImageInfo(id: "sha256:d9e853e87e55", repository: "docker.io/library/alpine", tag: "3.20"),
         ImageInfo(id: "sha256:06d7adf3e0ef", repository: "docker.io/library/alpine", tag: "latest"),
         ImageInfo(id: "sha256:d9e8ff000000", repository: "ghcr.io/acme/app", tag: "1.0"),
+        ImageInfo(id: "sha256:aaaa00000000", repository: "docker.io/myorg/alpine", tag: "latest"),
     ]
 
     private let containers = [
@@ -54,6 +55,8 @@ struct ListFilterTests {
         ContainerInfo(id: "c2", name: "qualified", image: "docker.io/library/alpine:3.20", state: .running, status: "Up", created: .now),
         ContainerInfo(id: "c3", name: "latest", image: "alpine", state: .running, status: "Up", created: .now),
         ContainerInfo(id: "c4", name: "app", image: "ghcr.io/acme/app:1.0", state: .running, status: "Up", created: .now),
+        ContainerInfo(id: "c5", name: "org", image: "myorg/alpine", state: .running, status: "Up", created: .now),
+        ContainerInfo(id: "c6", name: "gone", image: "busybox:1.36", state: .exited, status: "Exited", created: .now),
     ]
 
     private func containerIDs(_ filter: String) throws -> [String] {
@@ -76,5 +79,20 @@ struct ListFilterTests {
         #expect(try containerIDs("ancestor=nginx").isEmpty)
         // An ID prefix two images share names neither.
         #expect(try containerIDs("ancestor=d9e8").isEmpty)
+    }
+}
+
+extension ListFilterTests {
+    @Test("ps: ancestor names one image, never another repository with the same short name")
+    func ancestorIsExactByName() throws {
+        #expect(try containerIDs("ancestor=alpine") == ["c3"])
+        #expect(try containerIDs("ancestor=myorg/alpine") == ["c5"])
+        #expect(try containerIDs("ancestor=docker.io/myorg/alpine:latest") == ["c5"])
+    }
+
+    @Test("ps: a container whose image is gone is still found by the name it ran")
+    func ancestorOfDeletedImage() throws {
+        #expect(try containerIDs("ancestor=busybox:1.36") == ["c6"])
+        #expect(try containerIDs("ancestor=busybox").isEmpty)
     }
 }
