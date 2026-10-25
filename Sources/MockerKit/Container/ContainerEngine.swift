@@ -40,7 +40,16 @@ public actor ContainerEngine {
 
     // MARK: - Run
 
+    /// Docker accepts an image ID where a name goes; `container run` only knows names and
+    /// would try to pull `d9e853e87e55:latest`. Anything that is not a local ID passes through.
+    private func resolvedImage(_ image: String) async throws -> String {
+        guard ImageManager.looksLikeDigest(image) else { return image }
+        return try await ImageManager(config: config).name(forID: image) ?? image
+    }
+
     public func run(_ containerConfig: ContainerConfig) async throws -> ContainerInfo {
+        var containerConfig = containerConfig
+        containerConfig.image = try await resolvedImage(containerConfig.image)
         let name = try await claimName(containerConfig)
 
         let args = Self.buildRunArguments(name: name, config: containerConfig)
@@ -369,6 +378,8 @@ public actor ContainerEngine {
     /// A `-d` run followed by polling the log cannot do that, since the runtime does not
     /// expose the exit code of a detached container.
     public func runAttached(_ containerConfig: ContainerConfig) async throws -> Int32 {
+        var containerConfig = containerConfig
+        containerConfig.image = try await resolvedImage(containerConfig.image)
         let name = try await claimName(containerConfig)
 
         // Recorded up front so ps/stop/kill see the container while the run is blocking.

@@ -457,6 +457,17 @@ public actor ImageManager {
 
     // MARK: - Helpers
 
+    /// The stored name of the local image an ID (full, truncated or hex prefix) refers to;
+    /// nil when `reference` is not an ID or matches nothing. Ambiguity is an error, as for `rmi`.
+    public func name(forID reference: String) async throws -> String? {
+        guard Self.looksLikeDigest(reference) else { return nil }
+        do {
+            return try await resolve(reference).reference
+        } catch MockerError.imageNotFound {
+            return nil
+        }
+    }
+
     /// Look an image up the way the user spelled it, falling back to the normalized
     /// `docker.io/library/...` form.
     ///
