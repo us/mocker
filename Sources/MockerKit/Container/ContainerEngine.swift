@@ -257,8 +257,10 @@ public actor ContainerEngine {
     /// stopped container still needs, so a prune has to know about them all.
     public func imagesInUse() async throws -> [String] {
         let (output, status) = try await runCLI(["ls", "--all", "--format", "json"])
+        // `[]` when there are none; empty output is read the same way.
+        let json = output.trimmingCharacters(in: .whitespacesAndNewlines)
         guard status == 0,
-              let entries = try? JSONSerialization.jsonObject(with: Data(output.utf8)) as? [[String: Any]] else {
+              let entries = json.isEmpty ? [] : try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [[String: Any]] else {
             throw MockerError.operationFailed("failed to list the runtime's containers")
         }
         return try await list(all: true).map(\.image) + Self.imageReferences(in: entries)
