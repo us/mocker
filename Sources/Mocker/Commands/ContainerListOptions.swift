@@ -33,7 +33,11 @@ struct ContainerListOptions: ParsableArguments {
         let engine = try ContainerEngine(config: config)
         // --latest / --last include all states regardless of --all (matches Docker).
         let includeAll = all || latest || last != nil
-        var containers = try filtered(try await engine.list(all: includeAll))
+        // `ancestor=` compares images, not the text they were started with, so only that
+        // filter pays for a listing.
+        let images = filter.contains { $0.hasPrefix("ancestor=") }
+            ? try await ImageManager(config: config).list(enrich: false) : []
+        var containers = try filtered(try await engine.list(all: includeAll), images: images)
 
         if latest {
             containers = Array(containers.prefix(1))
@@ -81,7 +85,8 @@ struct ContainerListOptions: ParsableArguments {
     }
 
     /// Apply Docker-style `--filter` predicates. Pure; safe to unit-test.
-    func filtered(_ containers: [ContainerInfo]) throws -> [ContainerInfo] {
+    /// - Parameter images: the local images, which `ancestor=` resolves both sides against.
+    func filtered(_ containers: [ContainerInfo], images: [ImageInfo] = []) throws -> [ContainerInfo] {
         var containers = containers
         for f in try ListFilter.parse(filter, supported: ["name", "status", "id", "label", "ancestor"]) {
             let value = f.value
@@ -100,7 +105,7 @@ struct ContainerListOptions: ParsableArguments {
                     containers = containers.filter { $0.labels[value] != nil }
                 }
             case "ancestor":
-                containers = containers.filter { $0.image == value || $0.image.hasPrefix(value) }
+                containers = containers.filter { ImageManager.isAncestor(value, of: $0.image, in: images) }
             default:
                 break  // unreachable: `parse` rejected every other key
             }

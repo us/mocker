@@ -186,6 +186,17 @@ public actor ImageManager {
             && (image.repository == ref.fullRepository || image.repository.hasSuffix("/\(ref.repository)"))
     }
 
+    /// Whether a container started from `containerImage` runs the image `reference` names —
+    /// `ps --filter ancestor=`. Both sides are looked up in `images` and compared by digest,
+    /// so an ID, `alpine:3.20` and `docker.io/library/alpine:3.20` all mean the same image
+    /// and a bare `alpine` means `alpine:latest`, as in Docker. An ID prefix shared by two
+    /// images names neither. Pure, so the matching can be tested without a store.
+    public static func isAncestor(_ reference: String, of containerImage: String, in images: [ImageInfo]) -> Bool {
+        let wanted = Set(images.filter { matches($0, reference: reference) }.map(\.id))
+        guard wanted.count == 1 else { return false }
+        return images.contains { wanted.contains($0.id) && matches($0, reference: containerImage) }
+    }
+
     /// Remove dangling images, or with `all` every image not in `inUse`, then let the
     /// runtime drop the blobs nothing references any more.
     /// - Returns: the images removed and the bytes their digests freed (a digest another
