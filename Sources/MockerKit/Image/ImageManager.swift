@@ -210,9 +210,11 @@ public actor ImageManager {
     /// `bitnami/nginx`, then as an ID prefix, which must name a single image.
     static func imageID(_ reference: String, in images: [ImageInfo]) -> String? {
         let names = resolutionCandidates(reference)
-        if let image = images.first(where: { names.contains($0.reference) }) { return image.id }
+        if let id = names.lazy.compactMap({ name in images.first { $0.reference == name }?.id }).first {
+            return id
+        }
         guard looksLikeDigest(reference) else { return nil }
-        let ids = Set(images.filter { digestBody($0.id).hasPrefix(digestBody(reference)) }.map(\.id))
+        let ids = matchingDigests(reference, in: images.map(\.id))
         return ids.count == 1 ? ids.first : nil
     }
 
