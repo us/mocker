@@ -1918,7 +1918,8 @@ struct ComposeAttach: AsyncParsableCommand {
         }
 
         let engine = try ContainerEngine(config: config)
-        try await engine.exec(containerName, command: [])
+        let status = try await engine.exec(containerName, command: [])
+        if status != 0 { throw ExitCode(status) }
     }
 }
 

@@ -378,28 +378,11 @@ public actor ContainerEngine {
         )
         try await store.save(record)
 
-        // posix_spawn, not Process: Process puts the child in its own process group, which
-        // makes it a background job for the terminal and its reads from a tty (-it) are ignored.
-        let argv = [Self.containerCLI] + Self.buildRunArguments(name: name, config: containerConfig, attached: true)
-        let cArgs: [UnsafeMutablePointer<CChar>?] = argv.map { strdup($0) } + [nil]
-        defer { cArgs.forEach { free($0) } }
-
         // Ctrl-C reaches the whole foreground group, child included, but this process must
         // outlive the child to clean up after it. So SIGINT/SIGTERM are caught here and passed
         // to the container itself, which is what Docker's --sig-proxy does: the runtime's own
         // `run` does not forward them when there is no tty. The child gets the default action
-        // back (an ignored signal would otherwise survive the exec), so with a tty it still
-        // sees the keystroke directly.
-        var attr: posix_spawnattr_t?
-        posix_spawnattr_init(&attr)
-        defer { posix_spawnattr_destroy(&attr) }
-        var defaults = sigset_t()
-        sigemptyset(&defaults)
-        sigaddset(&defaults, SIGINT)
-        sigaddset(&defaults, SIGTERM)
-        posix_spawnattr_setsigdefault(&attr, &defaults)
-        posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETSIGDEF))
-
+        // back (see `spawnForeground`), so with a tty it still sees the keystroke directly.
         let forwarded = [(SIGINT, "INT"), (SIGTERM, "TERM")].map { (sig, label) -> DispatchSourceSignal in
             signal(sig, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: sig, queue: .global())
@@ -421,20 +404,13 @@ public actor ContainerEngine {
             signal(SIGTERM, SIG_DFL)
         }
 
-        var pid: pid_t = 0
-        guard posix_spawn(&pid, Self.containerCLI, nil, &attr, cArgs, environ) == 0 else {
+        let status: Int32
+        do {
+            status = try await Self.spawnForeground(
+                Self.buildRunArguments(name: name, config: containerConfig, attached: true))
+        } catch {
             try await store.delete(record.id)
-            throw MockerError.operationFailed("failed to launch \(Self.containerCLI)")
-        }
-
-        // Standard streams are inherited from this process.
-        let status: Int32 = await withCheckedContinuation { continuation in
-            DispatchQueue.global().async {
-                var raw: Int32 = 0
-                while waitpid(pid, &raw, 0) == -1 && errno == EINTR {}
-                // WIFEXITED / WEXITSTATUS / signal, as the shell reports them
-                continuation.resume(returning: (raw & 0x7f) == 0 ? (raw >> 8) & 0xff : 128 + (raw & 0x7f))
-            }
+            throw error
         }
 
         // A run that failed before the runtime created the container (unknown image, bad
@@ -489,19 +465,51 @@ public actor ContainerEngine {
             throw MockerError.containerNotRunning(identifier)
         }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: Self.containerCLI)
-        process.arguments = Self.makeExecArguments(
+        // Ctrl-C reaches the child directly (same foreground group); this process only waits.
+        signal(SIGINT, SIG_IGN)
+        signal(SIGTERM, SIG_IGN)
+        defer {
+            signal(SIGINT, SIG_DFL)
+            signal(SIGTERM, SIG_DFL)
+        }
+        return try await Self.spawnForeground(Self.makeExecArguments(
             name: container.name, command: command, interactive: interactive, tty: tty,
             detach: detach, env: env, envFiles: envFiles, user: user, workdir: workdir
-        )
-        process.standardInput = FileHandle.standardInput
-        process.standardOutput = FileHandle.standardOutput
-        process.standardError = FileHandle.standardError
-        try process.run()
+        ))
+    }
 
+    /// Run the container CLI with `arguments` on this process's stdio and return its exit
+    /// status as the shell reports it (128 + signal when it was killed).
+    ///
+    /// posix_spawn, not Process: Process puts the child in its own process group, which
+    /// makes it a background job for the terminal and its reads from a tty (-it) are ignored.
+    /// The child gets SIGINT/SIGTERM's default action back, since a signal the caller
+    /// ignores would otherwise stay ignored across the exec.
+    private static func spawnForeground(_ arguments: [String]) async throws -> Int32 {
+        let cArgs: [UnsafeMutablePointer<CChar>?] = ([containerCLI] + arguments).map { strdup($0) } + [nil]
+        defer { cArgs.forEach { free($0) } }
+
+        var attr: posix_spawnattr_t?
+        posix_spawnattr_init(&attr)
+        defer { posix_spawnattr_destroy(&attr) }
+        var defaults = sigset_t()
+        sigemptyset(&defaults)
+        sigaddset(&defaults, SIGINT)
+        sigaddset(&defaults, SIGTERM)
+        posix_spawnattr_setsigdefault(&attr, &defaults)
+        posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETSIGDEF))
+
+        var pid: pid_t = 0
+        guard posix_spawn(&pid, containerCLI, nil, &attr, cArgs, environ) == 0 else {
+            throw MockerError.operationFailed("failed to launch \(containerCLI)")
+        }
         return await withCheckedContinuation { continuation in
-            process.terminationHandler = { continuation.resume(returning: $0.terminationStatus) }
+            DispatchQueue.global().async {
+                var raw: Int32 = 0
+                while waitpid(pid, &raw, 0) == -1 && errno == EINTR {}
+                // WIFEXITED / WEXITSTATUS / signal, as the shell reports them
+                continuation.resume(returning: (raw & 0x7f) == 0 ? (raw >> 8) & 0xff : 128 + (raw & 0x7f))
+            }
         }
     }
 
