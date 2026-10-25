@@ -88,6 +88,8 @@ extension ListFilterTests {
         #expect(try containerIDs("ancestor=alpine") == ["c3"])
         #expect(try containerIDs("ancestor=myorg/alpine") == ["c5"])
         #expect(try containerIDs("ancestor=docker.io/myorg/alpine:latest") == ["c5"])
+        // An ID is matched however it is cased, as `rmi` and `run` do.
+        #expect(try containerIDs("ancestor=D9E853E87E55") == ["c1", "c2"])
     }
 
     @Test("ps: a container whose image is gone is still found by the name it ran")
