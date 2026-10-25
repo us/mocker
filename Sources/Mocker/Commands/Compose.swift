@@ -722,6 +722,7 @@ struct ComposeBuildCommand: AsyncParsableCommand {
                 tags: [tag], context: absContext,
                 dockerfile: dockerfilePath,
                 noCache: noCache, buildArgs: buildConfig.argList + buildArg,
+                platforms: service.platform.map { [$0] } ?? [],
                 target: buildConfig.target
             )
             if !quiet { print("Successfully built \(name)") }

@@ -588,6 +588,8 @@ public actor ComposeOrchestrator {
                     context: absContext,
                     dockerfile: dockerfilePath,
                     buildArgs: build.argList,
+                    // Built for `platform:`, or the run (`--os/--arch`) finds no matching image.
+                    platforms: service.platform.map { [$0] } ?? [],
                     target: build.target
                 )
             }
