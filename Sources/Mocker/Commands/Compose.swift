@@ -1832,13 +1832,6 @@ struct ComposeCp: AsyncParsableCommand {
         let (_, project, _) = try options.loadCompose()
         let config = MockerConfig()
 
-        if options.dryRun {
-            ComposeDryRun.report("cp", targets: ["\(source) -> \(destination)"])
-            return
-        }
-
-        let engine = try ContainerEngine(config: config)
-
         // `service:path` on either side; the service maps to its `<index>` container.
         let (srcService, srcPath) = Cp.parseCpArg(source)
         let (dstService, dstPath) = Cp.parseCpArg(destination)
@@ -1848,6 +1841,13 @@ struct ComposeCp: AsyncParsableCommand {
         guard srcService == nil || dstService == nil else {
             throw MockerError.operationFailed("copying between containers is not supported")
         }
+
+        if options.dryRun {
+            ComposeDryRun.report("cp", targets: ["\(source) -> \(destination)"])
+            return
+        }
+
+        let engine = try ContainerEngine(config: config)
         func side(_ service: String?, _ path: String) async throws -> String {
             guard let service else { return path }
             let containerName = "\(project)-\(service)-\(index)"
