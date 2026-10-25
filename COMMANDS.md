@@ -576,7 +576,9 @@ mocker tag SOURCE TARGET
 
 Remove one or more images, by reference or by image ID (a full or truncated digest, as
 printed by `mocker images -q`). An ID prefix that matches more than one image is an error
-rather than a guess.
+rather than a guess. A name untags that one reference; an ID names the image, so when
+several tags share it `rmi` refuses unless `--force`, which untags them all. `Deleted:` is
+printed only when no reference to the image remains, as in Docker.
 
 ```
 mocker rmi [OPTIONS] IMAGE [IMAGE...]
@@ -584,7 +586,7 @@ mocker rmi [OPTIONS] IMAGE [IMAGE...]
 
 | Flag | Short | Description |
 |------|-------|-------------|
-| `--force` | `-f` | Force removal of the image |
+| `--force` | `-f` | Remove an image by ID even when several tags share it (untags them all) |
 | `--no-prune` | | Do not delete untagged parents |
 | `--platform` | | Remove only the given platform variant |
 

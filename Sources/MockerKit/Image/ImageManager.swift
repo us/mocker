@@ -117,13 +117,39 @@ public actor ImageManager {
 
     // MARK: - Remove
 
-    /// Remove an image by reference.
-    public func remove(_ reference: String) async throws -> ImageInfo {
+    /// Remove an image by name or ID. A name untags that one reference, as Docker does.
+    /// An ID names the image itself: with several tags it is refused unless `force`d, and
+    /// forced it untags them all — Docker's rule, and what `images -q | xargs rmi` relies on.
+    /// - Returns: each reference untagged, and whether the image is now gone — which is
+    ///   when Docker prints `Deleted:`.
+    public func remove(_ reference: String, force: Bool = false) async throws -> (untagged: [ImageInfo], deleted: Bool) {
         let image = try await resolve(reference)
-        let info = await Self.toImageInfo(image)
-        // Delete the reference that actually matched, never a re-derived one.
-        try await imageStore.delete(reference: image.reference)
-        return info
+        // A hex name that answered as a name is a name; only a digest match is "by ID".
+        let byID = Self.looksLikeDigest(reference)
+            && !Self.resolutionCandidates(reference).contains(image.reference)
+        var images = [image]
+        if byID {
+            images = try await imageStore.list().filter { $0.digest == image.digest }
+            try Self.checkRemovable(byID: image.digest, tags: images.map(\.reference), force: force)
+        }
+        var untagged: [ImageInfo] = []
+        for each in images {
+            untagged.append(await Self.toImageInfo(each))
+            // Delete the reference that actually matched, never a re-derived one.
+            try await imageStore.delete(reference: each.reference)
+        }
+        let remains = try await imageStore.list().contains { $0.digest == image.digest }
+        return (untagged, !remains)
+    }
+
+    /// Docker refuses `rmi <id>` while several tags share the image, unless forced; a guess
+    /// at which tag was meant would untag the wrong one and still report success. Pure, so
+    /// the rule can be tested without a store.
+    static func checkRemovable(byID digest: String, tags: [String], force: Bool) throws {
+        guard tags.count > 1, !force else { return }
+        let shortID = String(digestBody(digest).prefix(12))
+        throw MockerError.operationFailed(
+            "conflict: unable to delete \(shortID) (must be forced) - image is referenced in multiple repositories")
     }
 
     // MARK: - Prune
@@ -167,7 +193,7 @@ public actor ImageManager {
     public func prune(all: Bool, inUse: [String]) async throws -> (removed: [ImageInfo], reclaimed: UInt64) {
         var removed: [ImageInfo] = []
         for image in Self.pruneCandidates(try await list(), all: all, inUse: inUse) {
-            removed.append(try await remove(image.reference))
+            removed.append(contentsOf: try await remove(image.reference).untagged)
         }
         // Orphaned blobs are garbage-collected by the CLI; the store API does not expose that.
         _ = try await RealProcessRunner().run(executable: Self.containerCLI, arguments: ["image", "prune"])

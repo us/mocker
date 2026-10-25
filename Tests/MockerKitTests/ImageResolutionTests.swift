@@ -128,3 +128,29 @@ struct ImageResolutionTests {
         #expect(ImageManager.matchingDigests("ffff", in: Self.digests).isEmpty)
     }
 }
+
+/// `rmi <id>` names the image, not one of its tags. Docker refuses while several tags
+/// share it unless forced; untagging the first match and printing `Deleted:` is a lie
+/// that leaves `images -q | xargs rmi` with the image still there.
+@Suite("ImageManager remove by ID")
+struct ImageManagerRemoveByIDTests {
+    private let digest = "sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc"
+
+    @Test("a single tag is removable without force")
+    func singleTag() throws {
+        try ImageManager.checkRemovable(byID: digest, tags: ["docker.io/library/alpine:3.20"], force: false)
+    }
+
+    @Test("several tags are refused unless forced, with Docker's conflict message")
+    func severalTagsRefused() {
+        let tags = ["docker.io/library/alpine:3.20", "docker.io/library/rmi-probe:x"]
+        #expect {
+            try ImageManager.checkRemovable(byID: digest, tags: tags, force: false)
+        } throws: { error in
+            "\(error)".contains("unable to delete d9e853e87e55 (must be forced)")
+        }
+        #expect(throws: Never.self) {
+            try ImageManager.checkRemovable(byID: digest, tags: tags, force: true)
+        }
+    }
+}

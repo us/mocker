@@ -24,9 +24,13 @@ struct Rmi: AsyncParsableCommand {
         let manager = try ImageManager(config: config)
 
         for reference in images {
-            let image = try await manager.remove(reference)
-            print("Untagged: \(image.reference)")
-            print("Deleted: \(image.id)")
+            let removal = try await manager.remove(reference, force: force)
+            for image in removal.untagged {
+                print("Untagged: \(image.reference)")
+            }
+            if removal.deleted, let image = removal.untagged.first {
+                print("Deleted: \(image.id)")
+            }
         }
     }
 }
