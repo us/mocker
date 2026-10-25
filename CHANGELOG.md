@@ -12,6 +12,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **image inspect:** `mocker image inspect` and `mocker inspect --type=image` now return Docker-compatible `ImageInspect` JSON arrays with PascalCase keys instead of the previous lowercase `ImageInfo` object shape.
 * **MockerKit:** `ImageManager.inspect(_:platform:)` returns `ImageInspect` instead of `ImageInfo`.
 
+## [0.9.8](https://github.com/us/mocker/compare/v0.9.7...v0.9.8) (2026-10-25)
+
+
+### Bug Fixes
+
+* **compose:** build a service with `platform:` for that platform ([cc12e2c](https://github.com/us/mocker/commit/cc12e2c52a818692b8459727c1a1045d35227752))
+* **compose:** honor the service `platform:` key ([543385f](https://github.com/us/mocker/commit/543385fce111676d0777dc7e6a61ed4a99e62af2))
+* **cp:** copy through `container cp` so directories and binary files work ([65ed689](https://github.com/us/mocker/commit/65ed689fee20650868bffe7e3e5b93ff1381afca))
+* **cp:** refuse service-to-service compose cp, never fail with no message ([557b2ce](https://github.com/us/mocker/commit/557b2cedb1158487e4aaf33628a2da119f2793e2))
+* **cp:** validate compose cp arguments before a dry run ([b94d9d3](https://github.com/us/mocker/commit/b94d9d3e410cb05adde698df9c2a649d91875bb4))
+* **exec:** forward -e/-w/-u/-d/--env-file and return the command's exit code ([817edbe](https://github.com/us/mocker/commit/817edbea581a8aee04047279aaee1d6da661b33f))
+* **exec:** let SIGTERM stop mocker while an exec waits ([c14f8d0](https://github.com/us/mocker/commit/c14f8d09cc2c8b53031c52ed7785fdf61463234d))
+* **exec:** spawn in the terminal's process group so -it reads the tty ([af733cf](https://github.com/us/mocker/commit/af733cf0ac2fe873300adf1f8d7e1cfd646f2763))
+* **images:** make the dangling filter select what image prune removes ([77e4cfb](https://github.com/us/mocker/commit/77e4cfb451f843209f801222c5c5d885c55a8171))
+* **images:** print 12 hex digits for short image IDs, matching Docker ([a19eb1b](https://github.com/us/mocker/commit/a19eb1b1a54cfcf5d84155b2bd6872c717c003ab))
+* **ls:** reject unknown --filter keys instead of returning the unfiltered list ([ee86582](https://github.com/us/mocker/commit/ee86582ee280ad260d10bc7c1e6cb29c08d271ce))
+* **prune:** keep every image an existing container still uses ([b28a22e](https://github.com/us/mocker/commit/b28a22e42c552bd55fc89f973149c629ac1115e6))
+* **prune:** make system/image prune do what they promise, add builder prune ([3e80fa8](https://github.com/us/mocker/commit/3e80fa896292463349c5be2ec6af8905c9170e56))
+* **prune:** read an empty runtime container listing as no containers ([27db84e](https://github.com/us/mocker/commit/27db84e96337eaf6f7b1800bb158e856f3456204))
+
 ## [0.9.7](https://github.com/us/mocker/compare/v0.9.6...v0.9.7) (2026-10-20)
 
 
