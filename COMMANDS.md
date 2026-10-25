@@ -1,4 +1,31 @@
-# Mocker CLI — Complete Command Reference
+#### `mocker system prune`
+
+Remove stopped containers, unused networks, dangling images and the build cache. The build cache cannot be pruned in part, so the builder VM is deleted; the next build starts a new one.
+
+```
+mocker system prune [OPTIONS]
+```
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--all` | `-a` | Remove all unused images, not just dangling ones |
+| `--volumes` | | Also prune anonymous volumes not used by a container |
+| `--force` | `-f` | Do not prompt for confirmation |
+| `--filter` | | Not supported (rejected) |
+
+### `mocker builder prune`
+
+Remove the build cache by deleting the builder VM; the next build starts a new one.
+
+```
+mocker builder prune [OPTIONS]
+```
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--all` | `-a` | Accepted; the cache is always removed whole |
+| `--force` | `-f` | Do not prompt for confirmation |
+Mocker CLI — Complete Command Reference
 
 Docker-compatible container management tool built on Apple Containerization framework (macOS 26+).
 
@@ -1370,9 +1397,9 @@ Always returns a JSON array using Docker `ImageInspect` field names.
 | `--format` | `-f` | Format output using a custom template |
 | `--platform` | | Inspect a specific platform of the multi-platform image |
 
-### `mocker image prune` [unsupported]
+### `mocker image prune`
 
-Remove unused images.
+Remove dangling images (untagged builds, which get a UUID name), or with `-a` every image no container uses. Images any existing container uses, and the runtime's own images, are kept. `--filter` is rejected.
 
 | Flag | Short | Description |
 |------|-------|-------------|

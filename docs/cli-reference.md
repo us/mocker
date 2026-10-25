@@ -654,7 +654,7 @@ mocker system info
 
 ### `mocker system prune`
 
-Remove stopped containers and unused resources.
+Remove stopped containers, unused networks, dangling images and the build cache (the builder VM is deleted; the next build starts a new one).
 
 ```bash
 mocker system prune [OPTIONS]
@@ -662,6 +662,8 @@ mocker system prune [OPTIONS]
 
 **Flags:**
 ```
+-a, --all     Remove every image no container uses, not just dangling ones
+    --volumes Also remove anonymous volumes not used by a container
 -f, --force   Do not prompt for confirmation
 ```
 
