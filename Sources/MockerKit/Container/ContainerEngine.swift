@@ -252,6 +252,27 @@ public actor ContainerEngine {
         return containers.filter { $0.state.isActive }
     }
 
+    /// Image references every existing container holds, running or stopped, including
+    /// containers made outside mocker (`container run`): the runtime deletes an image a
+    /// stopped container still needs, so a prune has to know about them all.
+    public func imagesInUse() async throws -> [String] {
+        let (output, status) = try await runCLI(["ls", "--all", "--format", "json"])
+        guard status == 0,
+              let entries = try? JSONSerialization.jsonObject(with: Data(output.utf8)) as? [[String: Any]] else {
+            throw MockerError.operationFailed("failed to list the runtime's containers")
+        }
+        return try await list(all: true).map(\.image) + Self.imageReferences(in: entries)
+    }
+
+    /// Reference and digest of each entry of `container ls --format json`. Pure, for tests.
+    static func imageReferences(in entries: [[String: Any]]) -> [String] {
+        entries.flatMap { entry -> [String] in
+            let image = (entry["configuration"] as? [String: Any])?["image"] as? [String: Any]
+            let digest = (image?["descriptor"] as? [String: Any])?["digest"] as? String
+            return [image?["reference"] as? String, digest].compactMap { $0 }
+        }
+    }
+
     // MARK: - Stop
 
     /// - Parameter timeout: seconds to wait for the container to exit before it is

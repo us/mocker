@@ -137,8 +137,6 @@ public actor NetworkManager {
         return RelativeDate.parse(text)
     }
 
-    /// Networks the runtime owns and that must never be pruned, identified the way the
-    /// runtime itself marks them rather than by guessing at names.
     /// Remove every network no container uses. The runtime's built-in network stays:
     /// pruning it would break every container that does not name a network.
     /// - Returns: the names actually removed. A network with containers attached is
@@ -154,6 +152,8 @@ public actor NetworkManager {
         return removed
     }
 
+    /// Networks the runtime owns and that must never be pruned, identified the way the
+    /// runtime itself marks them rather than by guessing at names.
     public static func isBuiltIn(_ network: NetworkInfo) -> Bool {
         network.labels["com.apple.container.resource.role"] == "builtin" || network.name == "default"
     }

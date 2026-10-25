@@ -239,6 +239,10 @@ struct NetworkPrune: AsyncParsableCommand {
     var filter: [String] = []
 
     func run() async throws {
+        // Pruning more than the filter asks for would delete networks the user meant to keep.
+        guard filter.isEmpty else {
+            throw MockerError.operationFailed("network prune --filter is not supported")
+        }
         if !force {
             print("WARNING! This will remove all custom networks not used by at least one container.")
             print("Are you sure you want to continue? [y/N] ", terminator: "")

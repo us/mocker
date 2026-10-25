@@ -145,8 +145,9 @@ public actor ImageManager {
     static func pruneCandidates(_ images: [ImageInfo], all: Bool, inUse: [String]) -> [ImageInfo] {
         images.filter { image in
             if runtimeImagePrefixes.contains(where: { image.repository.hasPrefix($0) }) { return false }
-            guard all else { return isDangling(image) }
-            return !inUse.contains { matches(image, reference: $0) }
+            // A container keeps its image in both modes, an untagged build included.
+            if inUse.contains(where: { matches(image, reference: $0) }) { return false }
+            return all || isDangling(image)
         }
     }
 

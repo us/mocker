@@ -32,7 +32,7 @@ struct ImagePrune: AsyncParsableCommand {
         }
 
         let config = MockerConfig()
-        let inUse = try await ContainerEngine(config: config).list(all: true).map(\.image)
+        let inUse = try await ContainerEngine(config: config).imagesInUse()
         let result = try await ImageManager(config: config).prune(all: all, inUse: inUse)
         Self.report(result.removed)
         print("Total reclaimed space: \(Self.bytes(result.reclaimed))")

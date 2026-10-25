@@ -191,8 +191,7 @@ struct SystemPrune: AsyncParsableCommand {
         }
 
         // Only the containers still present keep their images.
-        let inUse = containers.filter { $0.state.isActive }.map(\.image)
-        let images = try await ImageManager(config: config).prune(all: all, inUse: inUse)
+        let images = try await ImageManager(config: config).prune(all: all, inUse: try await engine.imagesInUse())
         ImagePrune.report(images.removed)
 
         // The builder's cache cannot be pruned in part (see `BuildCache`), so it goes

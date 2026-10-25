@@ -28,10 +28,32 @@ struct ImageManagerPruneTests {
         #expect(ImageManager.pruneCandidates(all, all: true, inUse: ["bbb2", "docker.io/library/alpine:3.20"]).map(\.id) == ["sha256:aaa1", "sha256:ccc3"])
     }
 
+    @Test("an untagged build a container still uses is not dangling-pruned")
+    func danglingInUseKept() {
+        #expect(ImageManager.pruneCandidates(all, all: false, inUse: ["sha256:aaa1"]).isEmpty)
+        #expect(ImageManager.pruneCandidates(all, all: false, inUse: [untaggedBuild.reference]).isEmpty)
+    }
+
     @Test("the runtime's own images are never candidates")
     func runtimeImagesKept() {
         let ids = ImageManager.pruneCandidates(all, all: true, inUse: []).map(\.id)
         #expect(!ids.contains("sha256:ddd4"))
         #expect(!ids.contains("sha256:eee5"))
+    }
+}
+
+@Suite("ContainerEngine images in use")
+struct ContainerEngineImagesInUseTests {
+
+    @Test("reference and digest come from each `container ls --format json` entry")
+    func imageReferences() {
+        let entries: [[String: Any]] = [
+            ["configuration": ["image": [
+                "reference": "docker.io/library/alpine:3.20",
+                "descriptor": ["digest": "sha256:d9e8"],
+            ]]],
+            ["configuration": [:]],
+        ]
+        #expect(ContainerEngine.imageReferences(in: entries) == ["docker.io/library/alpine:3.20", "sha256:d9e8"])
     }
 }
