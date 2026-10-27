@@ -44,6 +44,7 @@ Docker-compatible container management tool built on Apple Containerization fram
 - [Registry & Authentication](#registry--authentication)
 - [Network Management](#network-management)
 - [Volume Management](#volume-management)
+- [Context](#context)
 - [System](#system)
 - [Compose](#compose)
 - [Other](#other)
@@ -876,6 +877,46 @@ mocker volume prune [OPTIONS]
 | `--force` | `-f` | Do not prompt for confirmation |
 | `--all` | `-a` | Prune all unused volumes, not just anonymous ones |
 | `--filter` | | Provide filter values |
+
+---
+
+## Context
+
+Mocker has a single local runtime, so the only context is the built-in `default`.
+These commands exist so scripts that call `docker context show|ls|inspect` keep working.
+
+### `mocker context ls`
+
+```
+mocker context ls [OPTIONS]
+```
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--format` | | `table`, `json` or a Go template (`.Name`, `.Description`, `.DockerEndpoint`, `.Current`, `.Error`) |
+| `--quiet` | `-q` | Only show context names |
+
+### `mocker context show`
+
+Print the name of the current context (`default`).
+
+### `mocker context use`
+
+```
+mocker context use CONTEXT
+```
+
+Accepts `default` and prints it. Any other name fails with `context "NAME": context not found` and exit 1.
+
+### `mocker context inspect`
+
+```
+mocker context inspect [OPTIONS] [CONTEXT...]
+```
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--format` | `-f` | Format output using a custom template |
 
 ---
 
