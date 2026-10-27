@@ -47,6 +47,7 @@ See the **[CHANGELOG](CHANGELOG.md)** for the full, always-current release histo
 - **Docker CLI compatible** — `run`, `ps`, `stop`, `rm`, `exec`, `logs`, `build`, `pull`, `push`, `images`, `tag`, `rmi`, `inspect`, `stats`
 - **Network management** — `network create/ls/rm/inspect`, and compose `networks:`
 - **Volume management** — `volume create/ls/rm/inspect`
+- **Context** — `context ls/show/use/inspect` (only the built-in `default`)
 - **Docker Compose v2** — `compose up/down/ps/logs/restart` with dependency ordering
 - **MenuBar GUI** — Native SwiftUI app *(coming soon)*
 - **JSON state persistence** — All metadata stored in `~/.mocker/`
