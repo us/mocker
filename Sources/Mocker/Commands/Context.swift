@@ -72,51 +72,21 @@ struct ContextList: AsyncParsableCommand {
     var quiet = false
 
     func run() async throws {
-        let contexts = [ContextRecord.builtIn()]
-
-        if quiet {
-            for c in contexts { print(c.Name) }
-            return
-        }
+        let c = ContextRecord.builtIn()
+        if quiet { print(c.Name); return }
 
         switch format {
         case nil, "table":
             TableFormatter.print(
                 headers: ["Name", "Description", "Docker Endpoint", "Error"],
-                rows: contexts.map {
-                    [$0.Name + ($0.Name == ContextRecord.defaultName ? " *" : ""),
-                     $0.Metadata.Description, $0.dockerEndpoint, ""]
-                })
-        case "json":
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.withoutEscapingSlashes, .sortedKeys]
-            for c in contexts {
-                let row = ListRow(c)
-                print(String(decoding: try encoder.encode(row), as: UTF8.self))
-            }
-        case let template?:
-            for c in contexts {
-                let object = try JSONSerialization.jsonObject(
-                    with: JSONEncoder().encode(ListRow(c))) as? [String: Any] ?? [:]
-                print(try GoTemplate.render(template, object: object))
-            }
-        }
-    }
-
-    /// The columns `docker context ls --format` exposes as template fields.
-    private struct ListRow: Encodable {
-        var Name: String
-        var Description: String
-        var DockerEndpoint: String
-        var Current: Bool
-        var Error: String
-
-        init(_ c: ContextRecord) {
-            Name = c.Name
-            Description = c.Metadata.Description
-            DockerEndpoint = c.dockerEndpoint
-            Current = c.Name == ContextRecord.defaultName
-            Error = ""
+                rows: [[c.Name + " *", c.Metadata.Description, c.dockerEndpoint, ""]])
+        case let format?:
+            // The fields `docker context ls --format` exposes; `json` is one object per line.
+            let row: [String: Any] = [
+                "Name": c.Name, "Description": c.Metadata.Description,
+                "DockerEndpoint": c.dockerEndpoint, "Current": true, "Error": "",
+            ]
+            print(try GoTemplate.render(format == "json" ? "{{json .}}" : format, object: row))
         }
     }
 }
