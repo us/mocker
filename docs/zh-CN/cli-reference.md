@@ -34,6 +34,7 @@ Mocker 所有命令和参数的完整参考文档。
   - [volume ls](#volume-ls)
   - [volume rm](#volume-rm)
   - [volume inspect](#volume-inspect)
+- [上下文命令](#上下文命令)
 - [Compose 命令](#compose-命令)
   - [compose up](#compose-up)
   - [compose down](#compose-down)
@@ -679,6 +680,21 @@ mocker volume inspect 卷
   "labels": {}
 }
 ```
+
+---
+
+## 上下文命令
+
+Mocker 只有一个本地运行时，因此唯一的上下文是内置的 `default`。这些命令让调用 `docker context` 的脚本和工具继续可用。
+
+```
+mocker context ls [--format table|json|模板] [-q]
+mocker context show
+mocker context use default
+mocker context inspect [-f 格式] [上下文...]
+```
+
+`default` 以外的名称会报错 `context "NAME": context not found`，退出码 1。
 
 ---
 
