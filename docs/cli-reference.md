@@ -507,6 +507,21 @@ mocker volume inspect VOLUME
 
 ---
 
+## Context Commands
+
+Mocker has one local runtime, so the only context is the built-in `default`. These commands keep scripts and tools that call `docker context` working.
+
+```bash
+mocker context ls [--format table|json|TEMPLATE] [-q]
+mocker context show
+mocker context use default
+mocker context inspect [-f FORMAT] [CONTEXT...]
+```
+
+Any name other than `default` fails with `context "NAME": context not found` and exit 1.
+
+---
+
 ## Compose Commands
 
 All compose subcommands share these options:
