@@ -24,10 +24,9 @@ struct ContextCLITests {
         #expect(throws: ContextError.self) { _ = try ContextInspect.resolve(["nope"]) }
     }
 
-    @Test("use accepts default and rejects unknown contexts")
+    @Test("use parses a context name")
     func useChecksName() throws {
         #expect(try MockerCLI.parseAsRoot(["context", "use", "default"]) is ContextUse)
-        #expect(throws: ContextError.self) { _ = try ContextInspect.resolve(["other"]) }
     }
 
     @Test("ls accepts the list alias and --quiet")
