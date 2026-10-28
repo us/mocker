@@ -7,7 +7,7 @@ struct Version: AsyncParsableCommand {
     )
 
     // x-release-please-start-version
-    static let currentVersion = "0.9.9"
+    static let currentVersion = "0.9.10"
     // x-release-please-end
 
     @Option(name: .shortAndLong, help: "Format output using a custom template")
